@@ -74,9 +74,15 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
   }
 
   Future<void> _requestPermissions() async {
+    // 1. 알림 권한 요청
     final NotificationPermission status = await FlutterForegroundTask.checkNotificationPermission();
     if (status != NotificationPermission.granted) {
       await FlutterForegroundTask.requestNotificationPermission();
+    }
+
+    // 2.배터리 최적화 예외 요청 팝업 띄우기
+    if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
     }
   }
 
@@ -147,6 +153,8 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
   Future<void> _startForegroundService() async {
     if (await FlutterForegroundTask.isRunningService == false) {
       await FlutterForegroundTask.startService(
+        serviceId: 100, // 서비스 ID 지정 (최신 버전 권장사항)
+        serviceTypes: [ForegroundServiceTypes.specialUse], //서비스 타입 설정
         notificationTitle: '내 맘대로 타이머',
         notificationText: '시작됨...',
         callback: startCallback,
@@ -204,6 +212,8 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
   Future<void> _restartForegroundService() async {
     await FlutterForegroundTask.stopService();
     await FlutterForegroundTask.startService(
+      serviceId: 100, // 위와 동일한 ID 사용
+      serviceTypes: [ForegroundServiceTypes.specialUse], //서비스 타입 설정
       notificationTitle: '내 맘대로 타이머',
       notificationText: '00분 00초 경과',
       callback: startCallback,
