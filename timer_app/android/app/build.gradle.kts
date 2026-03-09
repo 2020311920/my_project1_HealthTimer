@@ -7,7 +7,8 @@ plugins {
 
 android {
     namespace = "com.example.timer_app"
-    compileSdk = flutter.compileSdkVersion
+    //compileSdk = flutter.compileSdkVersion
+    compileSdk = 36 //포그라운드 서비스를 추가함으로서 compileSdk 버전을 36로 올려야 함
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -24,8 +25,10 @@ android {
         applicationId = "com.example.timer_app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        //minSdk = flutter.minSdkVersion
+        //targetSdk = flutter.targetSdkVersion
+        minSdk = 24//포그라운드 서비스를 추가함으로서 minSdk 버전을 24로 올려야 함
+        targetSdk = 36//포그라운드 서비스를 추가함으로서 targetSdk 버전을 36로 올려야 함
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
