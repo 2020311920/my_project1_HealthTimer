@@ -5,10 +5,10 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 @pragma('vm:entry-point')
 void startCallback() {
-  FlutterForegroundTask.setTaskHandler(EmptyTaskHandler());
+  FlutterForegroundTask.setTaskHandler(TimerTaskHandler());
 }
 
-class EmptyTaskHandler extends TaskHandler {
+class TimerTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {}
   @override
@@ -17,8 +17,12 @@ class EmptyTaskHandler extends TaskHandler {
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
   @override
   void onNotificationPressed() {}
+  //알림창의 버튼이 눌렸을 때 실행되는 함수
   @override
-  void onNotificationButtonPressed(String id) {}
+  void onNotificationButtonPressed(String id) {
+    // 눌린 버튼의 ID('pause', 'resume', 'reset')를 메인 앱 화면으로 쏴줍니다.
+    FlutterForegroundTask.sendDataToMain(id);
+  }
 }
 
 void main() {
@@ -49,10 +53,13 @@ class TimerScreen extends StatefulWidget {
   State<TimerScreen> createState() => _TimerScreenState();
 }
 
-class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStateMixin {
+class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   int _milliseconds = 0;
   Timer? _timer;
   bool _isRunning = false;
+
+  //현재 앱이 화면에 있는지 판별하는 변수 추가
+  AppLifecycleState _appState = AppLifecycleState.resumed;
 
   late AnimationController _glowController;
   late Animation<double> _glowOpacity;
@@ -61,8 +68,12 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); //감지기 부착
     _requestPermissions();
     _initForegroundTask();
+
+    //알림창에서 보낸 버튼 신호를 듣는 리스너 등록
+    FlutterForegroundTask.addTaskDataCallback(_onReceiveTaskData);
 
     _glowController = AnimationController(
       vsync: this,
@@ -110,9 +121,27 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
 
   @override
   void dispose() {
+    //리스너 해제 (메모리 누수 방지)
+    WidgetsBinding.instance.removeObserver(this);//감지기 해제
+    FlutterForegroundTask.removeTaskDataCallback(_onReceiveTaskData);
     _timer?.cancel();
     _glowController.dispose();
     super.dispose();
+  }
+
+  //5. 핵심: 사용자가 홈으로 나가거나 앱으로 돌아올 때 실행되는 함수!
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appState = state;
+    if (state == AppLifecycleState.paused) {
+      // 폰의 홈 버튼을 눌러 백그라운드로 나갔을 때 -> 타이머가 0초 이상이면 알림창 띄우기
+      if (_isRunning || _milliseconds > 0) {
+        _startForegroundServiceForCurrentState();
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      // 다시 우리 앱 화면으로 들어왔을 때 -> 알림창 바로 지워버리기! (렉 해소)
+      FlutterForegroundTask.stopService();
+    }
   }
 
   String _formatTime(int ms) {
@@ -122,7 +151,71 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}.${hundredths.toString().padLeft(2, '0')}';
   }
 
-  // 🌟 핵심 수정 1: 타이머 시작 (유령 타이머 방지)
+  String _formatTimeForNotification(int ms) {
+    int minutes = (ms ~/ 60000);
+    int seconds = (ms % 60000) ~/ 1000;
+    return '${minutes.toString().padLeft(2, '0')}분 ${seconds.toString().padLeft(2, '0')}초';
+  }
+
+  void _updateNotification() {
+    FlutterForegroundTask.updateService(
+      notificationTitle: _getNotificationTitle(),
+      notificationText: _formatTimeForNotification(_milliseconds),
+      notificationButtons: _getNotificationButtons(),
+    );
+  }
+
+  String _getNotificationTitle() {
+    if (_isRunning) return '타이머 작동 중 ⏳';
+    if (_milliseconds > 0) return '타이머 일시정지 ⏸️';
+    return '타이머 대기 중 ⏱️';
+  }
+
+  List<NotificationButton> _getNotificationButtons() {
+    if (_isRunning || _milliseconds > 0) {
+      return [
+        NotificationButton(id: _isRunning ? 'pause' : 'resume', text: _isRunning ? '⏸️ 일시정지' : '▶️ 시작'),
+        const NotificationButton(id: 'restart', text: '⏮️ 재시작'),
+        const NotificationButton(id: 'reset', text: '🔄 초기화'),
+      ];
+    } else {
+      return [
+        const NotificationButton(id: 'resume', text: '▶️ 시작'),
+        const NotificationButton(id: 'close', text: '❌ 닫기'),
+      ];
+    }
+  }
+
+  Future<void> _startForegroundServiceForCurrentState() async {
+    if (await FlutterForegroundTask.isRunningService == false) {
+      await FlutterForegroundTask.startService(
+        serviceId: 100,
+        serviceTypes: [ForegroundServiceTypes.specialUse],
+        notificationTitle: _getNotificationTitle(),
+        notificationText: _formatTimeForNotification(_milliseconds),
+        callback: startCallback,
+        notificationButtons: _getNotificationButtons(),
+      );
+    }
+  }
+
+  // 알림창에서 온 신호(id)에 따라 함수를 실행
+  void _onReceiveTaskData(Object data) {
+    if (data is String) {
+      if (data == 'pause') {
+        _pauseTimer();
+      } else if (data == 'resume') {
+        _startTimer();
+      } else if (data == 'reset') {
+        _resetTimer();
+      } else if (data == 'restart') {
+        _resetAndStartImmediately();
+      } else if (data == 'close') {
+        FlutterForegroundTask.stopService();
+      }
+    }
+  }
+
   void _startTimer() {
     if (_isRunning) return;
 
@@ -130,58 +223,47 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
       _isRunning = true;
     });
 
-    // 1. 대기(await) 없이 즉시 타이머 객체부터 생성해서 꽉 쥐고 있음
+    // 앱이 백그라운드일 때 버튼을 눌렀다면 즉시 알림창 업데이트
+    if (_appState != AppLifecycleState.resumed) {
+      _updateNotification();
+    }
+
     _timer = Timer.periodic(const Duration(milliseconds: 10), (timer) {
       setState(() {
         _milliseconds += 10;
       });
 
-      if (_milliseconds % 1000 == 0) {
-        int minutes = (_milliseconds ~/ 60000);
-        int seconds = (_milliseconds % 60000) ~/ 1000;
-        FlutterForegroundTask.updateService(
-          notificationTitle: '내 맘대로 타이머 작동 중',
-          notificationText: '${minutes.toString().padLeft(2, '0')}분 ${seconds.toString().padLeft(2, '0')}초 경과',
-        );
+      // 🌟 핵심: 폰 화면에 앱이 켜져 있을 땐 알림창 업데이트 안 함 (렉 완벽 제거)
+      if (_milliseconds % 1000 == 0 && _appState != AppLifecycleState.resumed) {
+        _updateNotification();
       }
     });
-
-    // 2. 알림창 서비스는 타이머 흐름을 끊지 않게 비동기 함수로 따로 던져놓음
-    _startForegroundService();
   }
 
-  Future<void> _startForegroundService() async {
-    if (await FlutterForegroundTask.isRunningService == false) {
-      await FlutterForegroundTask.startService(
-        serviceId: 100, // 서비스 ID 지정 (최신 버전 권장사항)
-        serviceTypes: [ForegroundServiceTypes.specialUse], //서비스 타입 설정
-        notificationTitle: '내 맘대로 타이머',
-        notificationText: '시작됨...',
-        callback: startCallback,
-      );
+  void _pauseTimer() {
+    _timer?.cancel();
+    setState(() {
+      _isRunning = false;
+    });
+    
+    if (_appState != AppLifecycleState.resumed) {
+      _updateNotification();
     }
   }
 
-  // 🌟 핵심 수정 2: 일시정지 (즉각 취소)
-  void _pauseTimer() {
-    _timer?.cancel(); // 누르자마자 즉시 타이머 파괴
-    setState(() {
-      _isRunning = false;
-    });
-    FlutterForegroundTask.stopService(); // await 제거 (기다리지 않고 끄기 명령만 툭 던짐)
-  }
-
-  // 🌟 핵심 수정 3: 초기화 (즉각 취소 및 0초 고정)
   void _resetTimer() {
-    _timer?.cancel(); // 즉시 파괴
+    _timer?.cancel();
     setState(() {
-      _milliseconds = 0; // 0으로 리셋
+      _milliseconds = 0;
       _isRunning = false;
     });
-    FlutterForegroundTask.stopService(); // await 제거
+    
+    // 🌟 핵심: 초기화 시 알림창을 끄지 않고 00분 00초 상태로 업데이트
+    if (_appState != AppLifecycleState.resumed) {
+      _updateNotification();
+    }
   }
 
-  // 🌟 핵심 수정 4: 초기화 후 바로 시작
   void _resetAndStartImmediately() {
     _timer?.cancel();
     
@@ -190,34 +272,19 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
       _isRunning = true;
     });
 
-    // 여기서도 await 없이 즉시 새 타이머 가동
+    if (_appState != AppLifecycleState.resumed) {
+      _updateNotification();
+    }
+
     _timer = Timer.periodic(const Duration(milliseconds: 10), (timer) {
       setState(() {
         _milliseconds += 10;
       });
 
-      if (_milliseconds % 1000 == 0) {
-        int minutes = (_milliseconds ~/ 60000);
-        int seconds = (_milliseconds % 60000) ~/ 1000;
-        FlutterForegroundTask.updateService(
-          notificationTitle: '내 맘대로 타이머 작동 중',
-          notificationText: '${minutes.toString().padLeft(2, '0')}분 ${seconds.toString().padLeft(2, '0')}초 경과',
-        );
+      if (_milliseconds % 1000 == 0 && _appState != AppLifecycleState.resumed) {
+        _updateNotification();
       }
     });
-
-    _restartForegroundService();
-  }
-
-  Future<void> _restartForegroundService() async {
-    await FlutterForegroundTask.stopService();
-    await FlutterForegroundTask.startService(
-      serviceId: 100, // 위와 동일한 ID 사용
-      serviceTypes: [ForegroundServiceTypes.specialUse], //서비스 타입 설정
-      notificationTitle: '내 맘대로 타이머',
-      notificationText: '00분 00초 경과',
-      callback: startCallback,
-    );
   }
 
   @override
