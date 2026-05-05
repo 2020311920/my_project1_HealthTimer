@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 class SettingsDialog extends StatefulWidget {
   final int initialMaxSets;
   final int initialRestSeconds;
+  final bool initialBeepEnabled;
 
   const SettingsDialog({
     super.key,
     required this.initialMaxSets,
     required this.initialRestSeconds,
+    required this.initialBeepEnabled,
   });
 
   @override
@@ -17,12 +19,14 @@ class SettingsDialog extends StatefulWidget {
 class _SettingsDialogState extends State<SettingsDialog> {
   late int tempMaxSets;
   late int tempRestSeconds;
+  late bool tempBeepEnabled;
 
   @override
   void initState() {
     super.initState();
     tempMaxSets = widget.initialMaxSets;
     tempRestSeconds = widget.initialRestSeconds;
+    tempBeepEnabled = widget.initialBeepEnabled;
   }
 
   @override
@@ -72,6 +76,18 @@ class _SettingsDialogState extends State<SettingsDialog> {
               )
             ],
           ),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('비프음 알림:', style: TextStyle(color: Colors.white, fontSize: 16)),
+              Switch(
+                value: tempBeepEnabled,
+                onChanged: (value) => setState(() { tempBeepEnabled = value; }),
+                activeColor: Colors.blue,
+              )
+            ],
+          ),
         ],
       ),
       actions: [
@@ -81,7 +97,11 @@ class _SettingsDialogState extends State<SettingsDialog> {
         ),
         TextButton(
           onPressed: () {
-            Navigator.pop(context, {'maxSets': tempMaxSets, 'restSeconds': tempRestSeconds});
+            Navigator.pop(context, {
+              'maxSets': tempMaxSets,
+              'restSeconds': tempRestSeconds,
+              'isBeepEnabled': tempBeepEnabled,
+            });
           },
           child: const Text('저장', style: TextStyle(color: Colors.blue)),
         ),

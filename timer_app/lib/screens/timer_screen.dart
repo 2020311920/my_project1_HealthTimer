@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/foreground_task_handler.dart';
 import '../../widgets/settings_dialog.dart';
@@ -24,6 +26,7 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
   int _maxSets = 4;           // 목표 최대 세트 수
   int _targetRestSeconds = 90; // 목표 휴식 시간 (기본 90초 = 1분 30초)
   bool _isResting = false;     // 현재 휴식 중인지 여부
+  bool _isBeepEnabled = true;  // 비프음 켜기/끄기 설정
 
   // 🌟 오디오 플레이어 장착!
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -38,6 +41,7 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
   @override
   void initState() {
     super.initState();
+    _loadSettings(); // 앱 시작 시 설정 불러오기
     WidgetsBinding.instance.addObserver(this); //감지기 부착
     _requestPermissions();
     _initForegroundTask();
@@ -54,23 +58,46 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
     _glowRadius = Tween<double>(begin: 20, end: 60).animate(_glowController);
   }
 
+  // 🌟 [추가] 기기에 저장된 설정 불러오기 및 시작 시 팝업 띄우기
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _maxSets = prefs.getInt('maxSets') ?? 4;
+      _targetRestSeconds = prefs.getInt('restSeconds') ?? 90;
+      _isBeepEnabled = prefs.getBool('isBeepEnabled') ?? true;
+    });
+
+    // 화면 렌더링이 끝난 직후 설정창 띄우기 (앱 켰을 때 바로 나타남)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showSettingsDialog();
+    });
+  }
+
   // 🌟 [추가] 톱니바퀴 설정창 띄우기 함수
   Future<void> _showSettingsDialog() async {
-    final result = await showDialog<Map<String, int>>(
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) {
         return SettingsDialog(
           initialMaxSets: _maxSets,
           initialRestSeconds: _targetRestSeconds,
+          initialBeepEnabled: _isBeepEnabled,
         );
       },
     );
 
     if (result != null) {
       setState(() {
-        _maxSets = result['maxSets']!;
-        _targetRestSeconds = result['restSeconds']!;
+        _maxSets = result['maxSets'] as int;
+        _targetRestSeconds = result['restSeconds'] as int;
+        _isBeepEnabled = result['isBeepEnabled'] as bool;
       });
+
+      // 변경된 설정을 기기에 저장하여 다음 실행 시에도 유지
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('maxSets', _maxSets);
+      await prefs.setInt('restSeconds', _targetRestSeconds);
+      await prefs.setBool('isBeepEnabled', _isBeepEnabled);
     }
   }
 
@@ -225,7 +252,9 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
       int targetMs = _targetRestSeconds * 1000;
       // 🌟 목표 휴식 시간 정각 도달 시!
       if (_milliseconds == targetMs) {
-        _audioPlayer.play(AssetSource('beep.mp3')); // 🌟 우리가 넣은 MP3 파일 재생!
+        if (_isBeepEnabled) {
+          _audioPlayer.play(AssetSource('beep.mp3')); // 🌟 사용자가 켜둔 경우에만 MP3 파일 재생!
+        }
         setState(() {
           _isResting = false; // 휴식 종료 -> 세트 진행 모드로 자동 전환 (시간은 계속 흘러감)
         });
@@ -263,6 +292,44 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
       _isResting = false;   // 🌟 휴식 상태도 초기화
     });
     
+    if (_appState != AppLifecycleState.resumed) _updateNotification();
+  }
+
+  // 🌟 [추가] 이전 단계로 되돌리기 (실수 복구용)
+  void _previousState() {
+    HapticFeedback.lightImpact(); // 🌟 햅틱 피드백 (진동)
+    setState(() {
+      if (_isResting) {
+        if (_currentSet > 1) {
+          _currentSet--;
+          _isResting = false;
+        } else {
+          // 1세트 휴식 중이라면 1세트 진행 중으로 복귀
+          _isResting = false;
+        }
+      } else {
+        // 진행 중일 때는 현재 세트의 휴식 중으로 복귀
+        _isResting = true;
+      }
+    });
+    if (_appState != AppLifecycleState.resumed) _updateNotification();
+  }
+
+  // 🌟 [추가] 다음 단계로 넘기기
+  void _nextState() {
+    HapticFeedback.lightImpact(); // 🌟 햅틱 피드백 (진동)
+    setState(() {
+      if (!_isResting) {
+        if (_currentSet >= _maxSets) {
+          _currentSet = 1;
+        } else {
+          _currentSet++;
+        }
+        _isResting = true;
+      } else {
+        _isResting = false;
+      }
+    });
     if (_appState != AppLifecycleState.resumed) _updateNotification();
   }
 
@@ -397,12 +464,27 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
               ),
             ),
 
-            // 2. 상태 텍스트 (정중앙에서 살짝 위쪽으로 띄움)
+            // 2. 상태 텍스트 및 조작 화살표 (정중앙에서 살짝 위쪽으로 띄움)
             Align(
               alignment: const Alignment(0, -0.6),
-              child: Text(
-                _getStatusText(),
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white70),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_ios, color: Colors.white70),
+                    onPressed: _previousState,
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    _getStatusText(),
+                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white70),
+                  ),
+                  const SizedBox(width: 10),
+                  IconButton(
+                    icon: const Icon(Icons.arrow_forward_ios, color: Colors.white70),
+                    onPressed: _nextState,
+                  ),
+                ],
               ),
             ),
 
