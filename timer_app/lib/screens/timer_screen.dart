@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
@@ -27,6 +28,9 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
   int _targetRestSeconds = 90; // 목표 휴식 시간 (기본 90초 = 1분 30초)
   bool _isResting = false;     // 현재 휴식 중인지 여부
   bool _isBeepEnabled = true;  // 비프음 켜기/끄기 설정
+  
+  bool _isWorkoutStarted = false; // 🌟 운동 진행(시작) 여부
+  int _totalMilliseconds = 0;     // 🌟 전체 운동 시간 누적
 
   // 🌟 오디오 플레이어 장착!
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -174,12 +178,27 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
     return '${minutes.toString().padLeft(2, '0')}분 ${seconds.toString().padLeft(2, '0')}초';
   }
 
+  // 🌟 전체 시간 표시용 포맷 (HH:MM:SS)
+  String _formatTotalTime(int ms) {
+    int hours = (ms ~/ 3600000);
+    int minutes = (ms % 3600000) ~/ 60000;
+    int seconds = (ms % 60000) ~/ 1000;
+    
+    if (hours > 0) {
+      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
   // 🌟 현재 상태에 맞는 텍스트를 반환하는 전용 함수
   String _getStatusText() {
     if (_isResting) {
+      // 타이머가 시작도 안 한 초기 상태
+      if (!_isWorkoutStarted) return '운동 준비 중';
       if (_currentSet == 1) return '새로운 1세트를 위한 휴식 중';
       return '$_currentSet세트를 위한 휴식 중';
     } else {
+      if (!_isWorkoutStarted) return '운동 준비 중';
       return '$_currentSet세트 진행 중';
     }
   }
@@ -246,6 +265,7 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
   void _onTick(Timer timer) {
     setState(() {
       _milliseconds += 10;
+      _totalMilliseconds += 10; // 🌟 전체 운동 시간도 함께 증가
     });
 
     if (_isResting) {
@@ -269,7 +289,10 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
 
   void _startTimer() {
     if (_isRunning) return;
-    setState(() { _isRunning = true; });
+    setState(() { 
+      _isRunning = true; 
+      _isWorkoutStarted = true; // 시작 버튼 누르면 진행 상태로 변경
+    });
 
     if (_appState != AppLifecycleState.resumed) _updateNotification();
 
@@ -339,6 +362,7 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
     setState(() {
       _milliseconds = 0;
       _isRunning = true;
+      _isWorkoutStarted = true; // 터치해서 시작해도 진행 상태로 변경
 
       // 🌟 루틴 핵심 로직: 터치 시 세트 증가 및 휴식 돌입
       if (!_isResting) {
@@ -358,6 +382,121 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
     if (_appState != AppLifecycleState.resumed) _updateNotification();
 
     _timer = Timer.periodic(const Duration(milliseconds: 10), _onTick);
+  }
+
+  // 🌟 [추가] 운동 종료 및 기록 저장
+  Future<void> _endWorkout() async {
+    if (!_isWorkoutStarted) return;
+    
+    _timer?.cancel();
+    setState(() { _isRunning = false; });
+
+    // 1. 현재까지의 기록 로컬 스토리지에 저장
+    final prefs = await SharedPreferences.getInstance();
+    final String today = DateTime.now().toIso8601String().split('T')[0]; // YYYY-MM-DD 형식
+    List<String> records = prefs.getStringList('workout_records_$today') ?? [];
+
+    Map<String, dynamic> newRecord = {
+      'date': DateTime.now().toIso8601String(),
+      'totalTimeMs': _totalMilliseconds,
+      'setsCompleted': _currentSet,
+      'targetSets': _maxSets,
+    };
+
+    records.add(jsonEncode(newRecord));
+    await prefs.setStringList('workout_records_$today', records);
+
+    // 2. 수고했다는 팝업 띄우기
+    if (mounted) {
+      await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          title: const Text('수고하셨습니다! 🎉', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Text(
+            '오늘의 전체 운동 시간: ${_formatTotalTime(_totalMilliseconds)}\n진행한 세트: $_currentSet / $_maxSets 세트\n기록이 성공적으로 달력에 저장되었습니다.',
+            style: const TextStyle(color: Colors.white70, fontSize: 16),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('확인', style: TextStyle(color: Colors.blue)),
+            )
+          ],
+        ),
+      );
+    }
+
+    // 3. 기록 저장 후 앱 상태 완전 초기화 (운동 준비 중으로 복귀)
+    setState(() {
+      _milliseconds = 0;
+      _totalMilliseconds = 0;
+      _currentSet = 1;
+      _isResting = false;
+      _isWorkoutStarted = false;
+    });
+    if (_appState != AppLifecycleState.resumed) _updateNotification();
+  }
+
+  // 🌟 [추가] 달력 띄워서 과거 기록 확인하기
+  Future<void> _showCalendar() async {
+    final selectedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+      builder: (context, child) {
+        return Theme(
+          data: ThemeData.dark().copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: Colors.blue, onPrimary: Colors.white,
+              surface: Color(0xFF1E1E1E), onSurface: Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (selectedDate != null && mounted) {
+      final prefs = await SharedPreferences.getInstance();
+      final String dateKey = selectedDate.toIso8601String().split('T')[0];
+      List<String> recordsStr = prefs.getStringList('workout_records_$dateKey') ?? [];
+
+      showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1E1E1E),
+            title: Text('${selectedDate.year}년 ${selectedDate.month}월 ${selectedDate.day}일 기록', 
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            content: recordsStr.isEmpty
+                ? const Text('이 날의 운동 기록이 없습니다.', style: TextStyle(color: Colors.white70))
+                : SizedBox(
+                    width: double.maxFinite,
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: recordsStr.length,
+                      itemBuilder: (context, index) {
+                        final record = jsonDecode(recordsStr[index]);
+                        return ListTile(
+                          leading: const Icon(Icons.fitness_center, color: Colors.blue),
+                          title: Text('총 운동 시간: ${_formatTotalTime(record['totalTimeMs'])}', style: const TextStyle(color: Colors.white)),
+                          subtitle: Text('수행 세트: ${record['setsCompleted']} / ${record['targetSets']}', style: const TextStyle(color: Colors.white70)),
+                        );
+                      },
+                    ),
+                  ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('닫기', style: TextStyle(color: Colors.blue)),
+              )
+            ],
+          );
+        },
+      );
+    }
   }
 
   @override
@@ -387,6 +526,10 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
           elevation: 0,
           actions: [
             IconButton(
+              icon: const Icon(Icons.calendar_month, color: Colors.white),
+              onPressed: _showCalendar,
+            ),
+            IconButton(
               icon: const Icon(Icons.settings, color: Colors.white),
               onPressed: _showSettingsDialog,
             ),
@@ -397,6 +540,22 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
         body: Stack(
           alignment: Alignment.center,
           children: [
+            // 0. 전체 운동 시간 표시 (정중앙 최상단)
+            Align(
+              alignment: const Alignment(0, -0.85),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('전체 운동 시간', style: TextStyle(color: Colors.white54, fontSize: 14)),
+                  const SizedBox(height: 5),
+                  Text(
+                    _formatTotalTime(_totalMilliseconds),
+                    style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+
             // 1. 타이머 원형 (화면 100% 정중앙에 고정)
             Align(
               alignment: Alignment.center,
@@ -462,6 +621,18 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
                   ),
                 ],
               ),
+            ),
+
+            // 4. 하단 운동 종료 버튼 (운동 진행 중에만 나타남)
+            Align(
+              alignment: const Alignment(0, 0.95),
+              child: _isWorkoutStarted
+                  ? TextButton.icon(
+                      icon: const Icon(Icons.stop_circle_outlined, color: Colors.redAccent),
+                      label: const Text('운동 종료 및 기록 저장', style: TextStyle(color: Colors.redAccent, fontSize: 16)),
+                      onPressed: _endWorkout,
+                    )
+                  : const SizedBox.shrink(),
             ),
 
             // 2. 상태 텍스트 및 조작 화살표 (정중앙에서 살짝 위쪽으로 띄움)
