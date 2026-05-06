@@ -34,11 +34,13 @@ class WorkoutRecord {
 
 class ExerciseSet {
   final int exerciseNum;
+  final String exerciseName;
   final int completed;
   final int target;
 
   ExerciseSet({
     required this.exerciseNum,
+    this.exerciseName = '운동',
     required this.completed,
     required this.target,
   });
@@ -46,6 +48,7 @@ class ExerciseSet {
   factory ExerciseSet.fromJson(Map<String, dynamic> json) {
     return ExerciseSet(
       exerciseNum: json['exerciseNum'] as int,
+      exerciseName: json['exerciseName'] as String? ?? '운동',
       completed: json['completed'] as int,
       target: json['target'] as int,
     );
@@ -54,6 +57,7 @@ class ExerciseSet {
   Map<String, dynamic> toJson() {
     return {
       'exerciseNum': exerciseNum,
+      'exerciseName': exerciseName,
       'completed': completed,
       'target': target,
     };

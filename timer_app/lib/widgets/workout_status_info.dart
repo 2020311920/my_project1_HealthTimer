@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../providers/workout_timer_provider.dart';
+
 import '../constants.dart';
+import '../providers/workout_timer_provider.dart';
 
 class WorkoutStatusInfo extends StatelessWidget {
   const WorkoutStatusInfo({super.key});
@@ -18,9 +19,13 @@ class WorkoutStatusInfo extends StatelessWidget {
               onPressed: provider.previousState,
             ),
             const SizedBox(width: 10),
-            Text(
-              provider.getStatusText(),
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppConstants.secondaryText),
+            Flexible(
+              child: Text(
+                provider.getStatusText(),
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppConstants.secondaryText),
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+              ),
             ),
             const SizedBox(width: 10),
             IconButton(
