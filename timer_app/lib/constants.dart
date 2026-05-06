@@ -9,15 +9,20 @@ class AppConstants {
   static String keyWorkoutRecords(String dateStr) => 'workout_records_$dateStr';
 
   // Colors
-  static const Color scaffoldBackground = Color(0xFF00050A);
-  static const Color dialogBackground = Color(0xFF1E1E1E);
+  static const Color scaffoldBackground = Color(0xFF000000); // Deep Black
+  static const Color backgroundColor = Color(0xFF0A0A0A);
+  static const Color dialogBackground = Color(0xFF151515); // Dark Gray
+  static const Color surfaceColor = Color(0xFF1C1C1E);
   
-  static const Color primaryBlue = Colors.blue;
-  static const Color primaryPurple = Colors.purple;
-  static const Color accentRed = Colors.red;
-  static const Color accentOrange = Colors.deepOrange;
-  static const Color primaryText = Colors.white;
-  static const Color secondaryText = Colors.white70;
+  static const Color primaryBlue = Color(0xFF00E5FF); // Neon Aqua
+  static const Color primaryPurple = Color(0xFFB388FF); // Neon Purple
+  static const Color accentRed = Color(0xFFFF1744); // Neon Coral Red
+  static const Color accentOrange = Color(0xFFFF9100); // Neon Orange
+  static const Color neonGreen = Color(0xFF00E676); // Neon Green for Success
+  
+  static const Color primaryText = Color(0xFFFFFFFF);
+  static const Color secondaryText = Color(0xFFA0A0A0);
+  static const Color dividerColor = Color(0xFF2A2A2A);
 
   // Defaults
   static const int defaultMaxSets = 4;

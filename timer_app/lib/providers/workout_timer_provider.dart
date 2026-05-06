@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -24,6 +26,8 @@ class WorkoutTimerProvider extends ChangeNotifier {
   bool _isBeepEnabled = AppConstants.defaultBeepEnabled;  
   
   int _currentExercise = 1;       
+  List<Map<String, dynamic>> _routines = [{'part': '기본 운동', 'exercises': <String>[]}]; // 기본 운동은 항상 존재
+  int _selectedRoutineIndex = 0;  // 현재 선택된 운동 부위 인덱스
   bool _isWorkoutStarted = false; 
   int _totalMilliseconds = 0;     
 
@@ -40,11 +44,16 @@ class WorkoutTimerProvider extends ChangeNotifier {
   bool get isResting => _isResting;
   bool get isBeepEnabled => _isBeepEnabled;
   int get currentExercise => _currentExercise;
+  List<Map<String, dynamic>> get routines => _routines;
+  int get selectedRoutineIndex => _selectedRoutineIndex;
   bool get isWorkoutStarted => _isWorkoutStarted;
   int get totalMilliseconds => _totalMilliseconds;
   AppLifecycleState get appState => _appState;
 
   WorkoutTimerProvider() {
+    FirebaseAuth.instance.authStateChanges().listen((user) {
+      _loadSettings();
+    });
     _loadSettings();
   }
 
@@ -53,11 +62,59 @@ class WorkoutTimerProvider extends ChangeNotifier {
   }
 
   Future<void> _loadSettings() async {
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid ?? 'guest';
     final prefs = await SharedPreferences.getInstance();
-    _maxSets = prefs.getInt(AppConstants.keyMaxSets) ?? AppConstants.defaultMaxSets;
-    _targetRestSeconds = prefs.getInt(AppConstants.keyRestSeconds) ?? AppConstants.defaultRestSeconds;
-    _isBeepEnabled = prefs.getBool(AppConstants.keyIsBeepEnabled) ?? AppConstants.defaultBeepEnabled;
+    
+    _maxSets = prefs.getInt('${uid}_${AppConstants.keyMaxSets}') ?? AppConstants.defaultMaxSets;
+    _targetRestSeconds = prefs.getInt('${uid}_${AppConstants.keyRestSeconds}') ?? AppConstants.defaultRestSeconds;
+    _isBeepEnabled = prefs.getBool('${uid}_${AppConstants.keyIsBeepEnabled}') ?? AppConstants.defaultBeepEnabled;
+    _selectedRoutineIndex = prefs.getInt('${uid}_selectedRoutineIndex') ?? 0;
+    
+    final routinesString = prefs.getString('${uid}_routines');
+    if (routinesString != null) {
+      final loadedRoutines = List<Map<String, dynamic>>.from(jsonDecode(routinesString));
+      if (loadedRoutines.isNotEmpty) {
+        _routines = loadedRoutines;
+      }
+    }
+
     notifyListeners();
+
+    // Firestore에서 유저 설정을 가져와 덮어씌움 (기기 간 동기화)
+    if (user != null) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+        if (doc.exists) {
+          final data = doc.data()!;
+          if (data.containsKey('settings')) {
+            final settings = data['settings'];
+            _maxSets = settings['maxSets'] ?? _maxSets;
+            _targetRestSeconds = settings['restSeconds'] ?? _targetRestSeconds;
+            _isBeepEnabled = settings['isBeepEnabled'] ?? _isBeepEnabled;
+
+            await prefs.setInt('${uid}_${AppConstants.keyMaxSets}', _maxSets);
+            await prefs.setInt('${uid}_${AppConstants.keyRestSeconds}', _targetRestSeconds);
+            await prefs.setBool('${uid}_${AppConstants.keyIsBeepEnabled}', _isBeepEnabled);
+          }
+          if (data.containsKey('routines')) {
+            final loadedRoutines = List<Map<String, dynamic>>.from(data['routines']);
+            if (loadedRoutines.isNotEmpty) {
+              _routines = loadedRoutines;
+            }
+            await prefs.setString('${uid}_routines', jsonEncode(_routines));
+          } else if (data.containsKey('customExercises')) {
+            // 기존 데이터 마이그레이션
+            _routines = [{'part': '기본 운동', 'exercises': List<String>.from(data['customExercises'])}];
+            await prefs.setString('${uid}_routines', jsonEncode(_routines));
+            await FirebaseFirestore.instance.collection('users').doc(uid).set({'routines': _routines}, SetOptions(merge: true));
+          }
+          notifyListeners();
+        }
+      } catch (e) {
+        debugPrint('Failed to load settings from Firestore: $e');
+      }
+    }
   }
 
   Future<void> saveSettings(int newMaxSets, int newRestSeconds, bool newIsBeepEnabled) async {
@@ -66,10 +123,68 @@ class WorkoutTimerProvider extends ChangeNotifier {
     _isBeepEnabled = newIsBeepEnabled;
     notifyListeners();
 
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid ?? 'guest';
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(AppConstants.keyMaxSets, _maxSets);
-    await prefs.setInt(AppConstants.keyRestSeconds, _targetRestSeconds);
-    await prefs.setBool(AppConstants.keyIsBeepEnabled, _isBeepEnabled);
+    
+    await prefs.setInt('${uid}_${AppConstants.keyMaxSets}', _maxSets);
+    await prefs.setInt('${uid}_${AppConstants.keyRestSeconds}', _targetRestSeconds);
+    await prefs.setBool('${uid}_${AppConstants.keyIsBeepEnabled}', _isBeepEnabled);
+
+    if (user != null) {
+      try {
+        await FirebaseFirestore.instance.collection('users').doc(uid).set({
+          'settings': {
+            'maxSets': _maxSets,
+            'restSeconds': _targetRestSeconds,
+            'isBeepEnabled': _isBeepEnabled,
+          }
+        }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('Failed to save settings to Firestore: $e');
+      }
+    }
+  }
+
+  Future<void> saveRoutines(List<Map<String, dynamic>> newRoutines) async {
+    _routines = newRoutines;
+    notifyListeners();
+
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid ?? 'guest';
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setString('${uid}_routines', jsonEncode(_routines));
+
+    if (user != null) {
+      try {
+        await FirebaseFirestore.instance.collection('users').doc(uid).set({
+          'routines': _routines,
+        }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('Failed to save routines to Firestore: $e');
+      }
+    }
+  }
+
+  void selectRoutine(int index) async {
+    if (index >= 0 && index < _routines.length) {
+      _selectedRoutineIndex = index;
+      notifyListeners();
+      final user = FirebaseAuth.instance.currentUser;
+      final uid = user?.uid ?? 'guest';
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('${uid}_selectedRoutineIndex', _selectedRoutineIndex);
+      if (user != null) {
+        try {
+          await FirebaseFirestore.instance.collection('users').doc(uid).set({
+            'settings': {'selectedRoutineIndex': _selectedRoutineIndex}
+          }, SetOptions(merge: true));
+        } catch (e) {
+          debugPrint('Failed to save selected routine: $e');
+        }
+      }
+    }
   }
 
   @override
@@ -220,16 +335,19 @@ class WorkoutTimerProvider extends ChangeNotifier {
     _timer?.cancel();
     _isRunning = false; 
 
+    final user = FirebaseAuth.instance.currentUser;
+    final String uid = user?.uid ?? 'guest';
+
     final prefs = await SharedPreferences.getInstance();
     final String today = DateTime.now().toIso8601String().split('T')[0]; 
-    final String key = AppConstants.keyWorkoutRecords(today);
+    final String key = '${uid}_${AppConstants.keyWorkoutRecords(today)}';
     List<String> records = prefs.getStringList(key) ?? [];
 
     List<ExerciseSet> exercisesList = [];
     for (int i = 1; i < _currentExercise; i++) {
-      exercisesList.add(ExerciseSet(exerciseNum: i, completed: _maxSets, target: _maxSets));
+      exercisesList.add(ExerciseSet(exerciseNum: i, exerciseName: _getExerciseNameForIndex(i), completed: _maxSets, target: _maxSets));
     }
-    exercisesList.add(ExerciseSet(exerciseNum: _currentExercise, completed: _currentSet, target: _maxSets));
+    exercisesList.add(ExerciseSet(exerciseNum: _currentExercise, exerciseName: _getExerciseNameForIndex(_currentExercise), completed: _currentSet, target: _maxSets));
 
     WorkoutRecord newRecord = WorkoutRecord(
       id: DateTime.now().millisecondsSinceEpoch.toString(), 
@@ -238,8 +356,25 @@ class WorkoutTimerProvider extends ChangeNotifier {
       exercises: exercisesList,
     );
 
-    records.add(jsonEncode(newRecord.toJson()));
+    final Map<String, dynamic> recordJson = newRecord.toJson();
+    recordJson['routineName'] = _routines.isNotEmpty ? _routines[_selectedRoutineIndex]['part'] : '기본 운동';
+
+    records.add(jsonEncode(recordJson));
     await prefs.setStringList(key, records);
+
+    // Save to Firestore if user is logged in
+    if (user != null) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('workouts')
+            .doc(newRecord.id)
+            .set(recordJson);
+      } catch (e) {
+        debugPrint('Failed to save to Firestore: $e');
+      }
+    }
 
     _milliseconds = 0;
     _totalMilliseconds = 0;
@@ -277,14 +412,26 @@ class WorkoutTimerProvider extends ChangeNotifier {
     return '${minutes.toString().padLeft(2, '0')}분 ${seconds.toString().padLeft(2, '0')}초';
   }
 
+  String _getExerciseNameForIndex(int idx) {
+    if (_routines.isEmpty || _selectedRoutineIndex < 0 || _selectedRoutineIndex >= _routines.length) {
+      return '종목 $idx';
+    }
+    final exercises = List<String>.from(_routines[_selectedRoutineIndex]['exercises'] ?? []);
+    if (idx - 1 < exercises.length) {
+      return exercises[idx - 1];
+    }
+    return '종목 $idx';
+  }
+
   String getStatusText() {
+    String exName = _getExerciseNameForIndex(_currentExercise);
     if (_isResting) {
       if (!_isWorkoutStarted) return '운동 준비 중';
-      if (_currentSet == 1) return '종목 $_currentExercise - 새로운 1세트 대기 중';
-      return '종목 $_currentExercise - $_currentSet세트 휴식 중';
+      if (_currentSet == 1) return '$exName - 새로운 1세트 대기 중';
+      return '$exName - $_currentSet세트 휴식 중';
     } else {
       if (!_isWorkoutStarted) return '운동 준비 중';
-      return '종목 $_currentExercise - $_currentSet세트 진행 중';
+      return '$exName - $_currentSet세트 진행 중';
     }
   }
 
