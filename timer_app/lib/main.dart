@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:provider/provider.dart';
 
 import 'screens/timer_screen.dart';
+import 'providers/workout_timer_provider.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   FlutterForegroundTask.initCommunicationPort(); 
-  runApp(const AmbientTimerApp());
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => WorkoutTimerProvider(),
+      child: const AmbientTimerApp(),
+    ),
+  );
 }
 
 class AmbientTimerApp extends StatelessWidget {

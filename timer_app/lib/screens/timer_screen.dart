@@ -1,13 +1,18 @@
-import 'dart:async';
+import 'dart:convert';
 
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../services/foreground_task_handler.dart';
-import '../../widgets/settings_dialog.dart';
+import '../constants.dart';
+import '../providers/workout_timer_provider.dart';
+import '../services/foreground_task_handler.dart';
+import '../widgets/control_buttons.dart';
+import '../widgets/settings_dialog.dart';
+import '../widgets/timer_circle_display.dart';
+import '../widgets/total_time_display.dart';
+import '../widgets/workout_status_info.dart';
 
 class TimerScreen extends StatefulWidget {
   const TimerScreen({super.key});
@@ -16,99 +21,50 @@ class TimerScreen extends StatefulWidget {
   State<TimerScreen> createState() => _TimerScreenState();
 }
 
-class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  int _milliseconds = 0;
-  Timer? _timer;
-  bool _isRunning = false;
-
-  //[추가] 세트 및 휴식 관리 변수
-  int _currentSet = 1;        // 현재 세트 수
-  int _maxSets = 4;           // 목표 최대 세트 수
-  int _targetRestSeconds = 90; // 목표 휴식 시간 (기본 90초 = 1분 30초)
-  bool _isResting = false;     // 현재 휴식 중인지 여부
-  bool _isBeepEnabled = true;  // 비프음 켜기/끄기 설정
-
-  // 🌟 오디오 플레이어 장착!
-  final AudioPlayer _audioPlayer = AudioPlayer();
-
-  //현재 앱이 화면에 있는지 판별하는 변수 추가
-  AppLifecycleState _appState = AppLifecycleState.resumed;
-
-  late AnimationController _glowController;
-  late Animation<double> _glowOpacity;
-  late Animation<double> _glowRadius;
+class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
+  late WorkoutTimerProvider _provider;
 
   @override
   void initState() {
     super.initState();
-    _loadSettings(); // 앱 시작 시 설정 불러오기
-    WidgetsBinding.instance.addObserver(this); //감지기 부착
+    _provider = Provider.of<WorkoutTimerProvider>(context, listen: false);
+    WidgetsBinding.instance.addObserver(this);
     _requestPermissions();
     _initForegroundTask();
 
-    //알림창에서 보낸 버튼 신호를 듣는 리스너 등록
     FlutterForegroundTask.addTaskDataCallback(_onReceiveTaskData);
 
-    _glowController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    )..repeat(reverse: true);
-
-    _glowOpacity = Tween<double>(begin: 0.2, end: 0.6).animate(_glowController);
-    _glowRadius = Tween<double>(begin: 20, end: 60).animate(_glowController);
-  }
-
-  // 🌟 [추가] 기기에 저장된 설정 불러오기 및 시작 시 팝업 띄우기
-  Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _maxSets = prefs.getInt('maxSets') ?? 4;
-      _targetRestSeconds = prefs.getInt('restSeconds') ?? 90;
-      _isBeepEnabled = prefs.getBool('isBeepEnabled') ?? true;
-    });
-
-    // 화면 렌더링이 끝난 직후 설정창 띄우기 (앱 켰을 때 바로 나타남)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _showSettingsDialog();
     });
   }
 
-  // 🌟 [추가] 톱니바퀴 설정창 띄우기 함수
   Future<void> _showSettingsDialog() async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) {
         return SettingsDialog(
-          initialMaxSets: _maxSets,
-          initialRestSeconds: _targetRestSeconds,
-          initialBeepEnabled: _isBeepEnabled,
+          initialMaxSets: _provider.maxSets,
+          initialRestSeconds: _provider.targetRestSeconds,
+          initialBeepEnabled: _provider.isBeepEnabled,
         );
       },
     );
 
     if (result != null) {
-      setState(() {
-        _maxSets = result['maxSets'] as int;
-        _targetRestSeconds = result['restSeconds'] as int;
-        _isBeepEnabled = result['isBeepEnabled'] as bool;
-      });
-
-      // 변경된 설정을 기기에 저장하여 다음 실행 시에도 유지
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('maxSets', _maxSets);
-      await prefs.setInt('restSeconds', _targetRestSeconds);
-      await prefs.setBool('isBeepEnabled', _isBeepEnabled);
+      _provider.saveSettings(
+        result['maxSets'] as int,
+        result['restSeconds'] as int,
+        result['isBeepEnabled'] as bool,
+      );
     }
   }
 
   Future<void> _requestPermissions() async {
-    // 1. 알림 권한 요청
     final NotificationPermission status = await FlutterForegroundTask.checkNotificationPermission();
     if (status != NotificationPermission.granted) {
       await FlutterForegroundTask.requestNotificationPermission();
     }
-
-    // 2.배터리 최적화 예외 요청 팝업 띄우기
     if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
       await FlutterForegroundTask.requestIgnoreBatteryOptimization();
     }
@@ -138,78 +94,20 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
 
   @override
   void dispose() {
-    //리스너 해제 (메모리 누수 방지)
-    WidgetsBinding.instance.removeObserver(this);//감지기 해제
+    WidgetsBinding.instance.removeObserver(this);
     FlutterForegroundTask.removeTaskDataCallback(_onReceiveTaskData);
-    _timer?.cancel();
-    _glowController.dispose();
     super.dispose();
   }
 
-  //5. 핵심: 사용자가 홈으로 나가거나 앱으로 돌아올 때 실행되는 함수!
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _appState = state;
+    _provider.setAppState(state);
     if (state == AppLifecycleState.paused) {
-      // 폰의 홈 버튼을 눌러 백그라운드로 나갔을 때 -> 타이머가 0초 이상이면 알림창 띄우기
-      if (_isRunning || _milliseconds > 0) {
+      if (_provider.isRunning || _provider.milliseconds > 0) {
         _startForegroundServiceForCurrentState();
       }
     } else if (state == AppLifecycleState.resumed) {
-      // 다시 우리 앱 화면으로 들어왔을 때 -> 알림창 바로 지워버리기! (렉 해소)
       FlutterForegroundTask.stopService();
-    }
-  }
-
-  String _formatTime(int ms) {
-    int minutes = (ms ~/ 60000);
-    int seconds = (ms % 60000) ~/ 1000;
-    int hundredths = (ms % 1000) ~/ 10;
-    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}.${hundredths.toString().padLeft(2, '0')}';
-  }
-
-  String _formatTimeForNotification(int ms) {
-    int minutes = (ms ~/ 60000);
-    int seconds = (ms % 60000) ~/ 1000;
-    return '${minutes.toString().padLeft(2, '0')}분 ${seconds.toString().padLeft(2, '0')}초';
-  }
-
-  // 🌟 현재 상태에 맞는 텍스트를 반환하는 전용 함수
-  String _getStatusText() {
-    if (_isResting) {
-      if (_currentSet == 1) return '새로운 1세트를 위한 휴식 중';
-      return '$_currentSet세트를 위한 휴식 중';
-    } else {
-      return '$_currentSet세트 진행 중';
-    }
-  }
-
-  void _updateNotification() {
-    FlutterForegroundTask.updateService(
-      notificationTitle: _getNotificationTitle(),
-      notificationText: _formatTimeForNotification(_milliseconds),
-      notificationButtons: _getNotificationButtons(),
-    );
-  }
-
-  String _getNotificationTitle() {
-    if (!_isRunning && _milliseconds == 0) return '타이머 대기 중 ⏱️';
-    if (!_isRunning) return '일시정지 ⏸️';
-    return _getStatusText(); // 알림창 제목도 앱 상태와 똑같이 연동!
-  }
-
-  List<NotificationButton> _getNotificationButtons() {
-    if (_isRunning || _milliseconds > 0) {
-      return [
-        NotificationButton(id: _isRunning ? 'pause' : 'resume', text: _isRunning ? '⏸️ 일시정지' : '▶️ 시작'),
-        const NotificationButton(id: 'restart', text: '⏮️ 재시작'),
-        const NotificationButton(id: 'reset', text: '🔄 초기화'),
-      ];
-    } else {
-      return [
-        const NotificationButton(id: 'resume', text: '▶️ 시작'),
-        const NotificationButton(id: 'close', text: '❌ 닫기'),
-      ];
     }
   }
 
@@ -218,10 +116,10 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
       await FlutterForegroundTask.startService(
         serviceId: 100,
         serviceTypes: [ForegroundServiceTypes.specialUse],
-        notificationTitle: _getNotificationTitle(),
-        notificationText: _formatTimeForNotification(_milliseconds),
+        notificationTitle: _provider.getNotificationTitle(),
+        notificationText: _provider.formatTimeForNotification(_provider.milliseconds),
         callback: startCallback,
-        notificationButtons: _getNotificationButtons(),
+        notificationButtons: _provider.getNotificationButtons(),
       );
     }
   }
@@ -229,312 +127,167 @@ class _TimerScreenState extends State<TimerScreen> with SingleTickerProviderStat
   void _onReceiveTaskData(Object data) {
     if (data is String) {
       if (data == 'pause') {
-        _pauseTimer();
+        _provider.pauseTimer();
       } else if (data == 'resume') {
-        _startTimer();
+        _provider.startTimer();
       } else if (data == 'reset') {
-        _resetTimer();
+        _provider.resetTimer();
       } else if (data == 'restart') {
-        _resetAndStartImmediately();
+        _provider.resetAndStartImmediately();
       } else if (data == 'close') {
         FlutterForegroundTask.stopService();
       }
     }
   }
 
-  // 🌟 (핵심) 매 0.01초마다 실행되는 틱(Tick) 함수 (경고음 로직 포함)
-  void _onTick(Timer timer) {
-    setState(() {
-      _milliseconds += 10;
-    });
+  Future<void> _showCalendar() async {
+    final selectedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+      builder: (context, child) {
+        return Theme(
+          data: ThemeData.dark().copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: AppConstants.primaryBlue, onPrimary: AppConstants.primaryText,
+              surface: AppConstants.dialogBackground, onSurface: AppConstants.primaryText,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
 
-    if (_isResting) {
-      int targetMs = _targetRestSeconds * 1000;
-      // 🌟 목표 휴식 시간 정각 도달 시!
-      if (_milliseconds == targetMs) {
-        if (_isBeepEnabled) {
-          _audioPlayer.play(AssetSource('beep.mp3')); // 🌟 사용자가 켜둔 경우에만 MP3 파일 재생!
-        }
-        setState(() {
-          _isResting = false; // 휴식 종료 -> 세트 진행 모드로 자동 전환 (시간은 계속 흘러감)
-        });
-        if (_appState != AppLifecycleState.resumed) _updateNotification();
-      }
+    if (selectedDate != null && mounted) {
+      final prefs = await SharedPreferences.getInstance();
+      final String dateKey = selectedDate.toIso8601String().split('T')[0];
+      List<String> recordsStr = prefs.getStringList(AppConstants.keyWorkoutRecords(dateKey)) ?? [];
+
+      showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            backgroundColor: AppConstants.dialogBackground,
+            title: Text('${selectedDate.year}년 ${selectedDate.month}월 ${selectedDate.day}일 기록', 
+                        style: const TextStyle(color: AppConstants.primaryText, fontWeight: FontWeight.bold)),
+            content: recordsStr.isEmpty
+                ? const Text('이 날의 운동 기록이 없습니다.', style: TextStyle(color: AppConstants.secondaryText))
+                : SizedBox(
+                    width: double.maxFinite,
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: recordsStr.length,
+                      itemBuilder: (context, index) {
+                        final record = jsonDecode(recordsStr[index]);
+                        return ListTile(
+                          leading: const Icon(Icons.fitness_center, color: AppConstants.primaryBlue),
+                          title: Text('총 운동 시간: ${_provider.formatTotalTime(record['totalTimeMs'])}', style: const TextStyle(color: AppConstants.primaryText)),
+                          subtitle: Text(
+                            record['exercises'] != null
+                                ? (record['exercises'] as List).map((e) => '종목 ${e['exerciseNum']}: ${e['completed']}/${e['target']}세트').join(', ')
+                                : '수행 세트: ${record['setsCompleted'] ?? 0} / ${record['targetSets'] ?? 0}',
+                            style: const TextStyle(color: AppConstants.secondaryText),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('닫기', style: TextStyle(color: AppConstants.primaryBlue)),
+              )
+            ],
+          );
+        },
+      );
     }
-
-    if (_milliseconds % 1000 == 0 && _appState != AppLifecycleState.resumed) {
-      _updateNotification();
-    }
-  }
-
-  void _startTimer() {
-    if (_isRunning) return;
-    setState(() { _isRunning = true; });
-
-    if (_appState != AppLifecycleState.resumed) _updateNotification();
-
-    // 새롭게 만든 _onTick 함수를 연결
-    _timer = Timer.periodic(const Duration(milliseconds: 10), _onTick);
-  }
-
-  void _pauseTimer() {
-    _timer?.cancel();
-    setState(() { _isRunning = false; });
-    if (_appState != AppLifecycleState.resumed) _updateNotification();
-  }
-
-  void _resetTimer() {
-    _timer?.cancel();
-    setState(() {
-      _milliseconds = 0;
-      _isRunning = false;
-      _currentSet = 1;      // 🌟 초기화 누르면 완전 처음(1세트)으로 복귀
-      _isResting = false;   // 🌟 휴식 상태도 초기화
-    });
-    
-    if (_appState != AppLifecycleState.resumed) _updateNotification();
-  }
-
-  // 🌟 [추가] 이전 단계로 되돌리기 (실수 복구용)
-  void _previousState() {
-    HapticFeedback.lightImpact(); // 🌟 햅틱 피드백 (진동)
-    setState(() {
-      if (_isResting) {
-        if (_currentSet > 1) {
-          _currentSet--;
-          _isResting = false;
-        } else {
-          // 1세트 휴식 중이라면 1세트 진행 중으로 복귀
-          _isResting = false;
-        }
-      } else {
-        // 진행 중일 때는 현재 세트의 휴식 중으로 복귀
-        _isResting = true;
-      }
-    });
-    if (_appState != AppLifecycleState.resumed) _updateNotification();
-  }
-
-  // 🌟 [추가] 다음 단계로 넘기기
-  void _nextState() {
-    HapticFeedback.lightImpact(); // 🌟 햅틱 피드백 (진동)
-    setState(() {
-      if (!_isResting) {
-        if (_currentSet >= _maxSets) {
-          _currentSet = 1;
-        } else {
-          _currentSet++;
-        }
-        _isResting = true;
-      } else {
-        _isResting = false;
-      }
-    });
-    if (_appState != AppLifecycleState.resumed) _updateNotification();
-  }
-
-  void _resetAndStartImmediately() {
-    _timer?.cancel();
-    
-    setState(() {
-      _milliseconds = 0;
-      _isRunning = true;
-
-      // 🌟 루틴 핵심 로직: 터치 시 세트 증가 및 휴식 돌입
-      if (!_isResting) {
-        if (_currentSet >= _maxSets) {
-          _currentSet = 1; // 최대 세트 도달 시 새로운 1세트로 순환
-        } else {
-          _currentSet++;
-        }
-        _isResting = true; // 휴식 모드 ON
-      }
-      else {
-        // 🌟 [추가된 로직] 휴식 중에 터치했다면? -> 휴식을 즉시 종료하고 세트 진행으로 변환!
-        _isResting = false; 
-      }
-    });
-
-    if (_appState != AppLifecycleState.resumed) _updateNotification();
-
-    _timer = Timer.periodic(const Duration(milliseconds: 10), _onTick);
   }
 
   @override
   Widget build(BuildContext context) {
-    // 🌟 기본 네온사인 색상 (파랑/보라)
-    Color glowColor1 = Colors.blue;
-    Color glowColor2 = Colors.purple;
-
-    // 🌟 휴식 중이고 남은 시간이 5초(5000ms) 이하일 때 색상 서서히 변경
-    if (_isResting) {
-      int remainingMs = _targetRestSeconds * 1000 - _milliseconds;
-      if (remainingMs <= 5000 && remainingMs > 0) {
-        // 남은 시간에 따라 0.0 ~ 1.0 사이의 비율(t) 계산 (5초 남았을 때 0.0, 0초일 때 1.0)
-        double t = (5000 - remainingMs) / 5000.0;
-        
-        // Color.lerp 함수가 비율(t)에 맞춰 두 색상을 자연스럽게 섞어줍니다!
-        glowColor1 = Color.lerp(Colors.blue, Colors.red, t) ?? Colors.blue;
-        glowColor2 = Color.lerp(Colors.purple, Colors.deepOrange, t) ?? Colors.purple;
-      }
-    }
-
     return WithForegroundTask(
       child: Scaffold(
-        extendBodyBehindAppBar: true, // 🌟 상단 바가 레이아웃을 밀어내지 않게 함
+        extendBodyBehindAppBar: true, 
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
           actions: [
             IconButton(
-              icon: const Icon(Icons.settings, color: Colors.white),
+              icon: const Icon(Icons.calendar_month, color: AppConstants.primaryText),
+              onPressed: _showCalendar,
+            ),
+            IconButton(
+              icon: const Icon(Icons.settings, color: AppConstants.primaryText),
               onPressed: _showSettingsDialog,
             ),
             const SizedBox(width: 10),
           ],
         ),
-        // 🌟 Column 대신 Stack을 사용하여 위치를 절대값으로 고정!
-        body: Stack(
-          alignment: Alignment.center,
-          children: [
-            // 1. 타이머 원형 (화면 100% 정중앙에 고정)
-            Align(
+        body: Consumer<WorkoutTimerProvider>(
+          builder: (context, provider, child) {
+            return Stack(
               alignment: Alignment.center,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  AnimatedBuilder(
-                    animation: _glowController,
-                    builder: (context, child) {
-                      return Container(
-                        width: 280,
-                        height: 280,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.transparent,
-                          boxShadow: [
-                            BoxShadow(
-                              color: glowColor1.withValues(alpha: _glowOpacity.value),
-                              blurRadius: _glowRadius.value,
-                              spreadRadius: 10,
-                            ),
-                            BoxShadow(
-                              color: glowColor2.withValues(alpha: _glowOpacity.value * 0.7),
-                              blurRadius: _glowRadius.value * 1.5,
-                              spreadRadius: 20,
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                  GestureDetector(
-                    onTap: _resetAndStartImmediately,
-                    behavior: HitTestBehavior.opaque,
-                    child: Container(
-                      width: 280,
-                      height: 280,
-                      alignment: Alignment.center,
-                      decoration: const BoxDecoration(shape: BoxShape.circle),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            _formatTime(_milliseconds),
-                            style: const TextStyle(
-                              fontSize: 70,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                              letterSpacing: -2,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            '중앙 터치 시 휴식/다음 세트',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.5),
-                              fontSize: 16,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+              children: [
+                const Align(
+                  alignment: Alignment(0, -0.85),
+                  child: TotalTimeDisplay(),
+                ),
 
-            // 2. 상태 텍스트 및 조작 화살표 (정중앙에서 살짝 위쪽으로 띄움)
-            Align(
-              alignment: const Alignment(0, -0.6),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back_ios, color: Colors.white70),
-                    onPressed: _previousState,
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    _getStatusText(),
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white70),
-                  ),
-                  const SizedBox(width: 10),
-                  IconButton(
-                    icon: const Icon(Icons.arrow_forward_ios, color: Colors.white70),
-                    onPressed: _nextState,
-                  ),
-                ],
-              ),
-            ),
+                const Align(
+                  alignment: Alignment.center,
+                  child: TimerCircleDisplay(),
+                ),
 
-            // 3. 하단 컨트롤 버튼들 (정중앙에서 아래쪽으로 띄움)
-            Align(
-              alignment: const Alignment(0, 0.75),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 120,
-                    height: 50,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _isRunning ? Colors.redAccent : Colors.green,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(25),
-                        ),
-                      ),
-                      onPressed: _isRunning ? _pauseTimer : _startTimer,
-                      child: Text(
-                        _isRunning ? '일시정지' : '시작',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                    ),
+                Align(
+                  alignment: const Alignment(0, 0.95),
+                  child: provider.isWorkoutStarted
+                      ? TextButton.icon(
+                          icon: const Icon(Icons.stop_circle_outlined, color: AppConstants.accentRed),
+                          label: const Text('운동 종료 및 기록 저장', style: TextStyle(color: AppConstants.accentRed, fontSize: 16)),
+                          onPressed: () async {
+                            await provider.endWorkout();
+                            if (mounted) {
+                              showDialog(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  backgroundColor: AppConstants.dialogBackground,
+                                  title: const Text('수고하셨습니다! 🎉', style: TextStyle(color: AppConstants.primaryText, fontWeight: FontWeight.bold)),
+                                  content: const Text(
+                                    '기록이 성공적으로 달력에 저장되었습니다.',
+                                    style: TextStyle(color: AppConstants.secondaryText, fontSize: 16),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(context),
+                                      child: const Text('확인', style: TextStyle(color: AppConstants.primaryBlue)),
+                                    )
+                                  ],
+                                ),
+                              );
+                            }
+                          },
+                        )
+                      : const SizedBox.shrink(),
+                ),
+
+                const Align(
+                  alignment: Alignment(0, -0.6),
+                  child: WorkoutStatusInfo(),
+                ),
+
+                Align(
+                  alignment: const Alignment(0, 0.75),
+                  child: ControlButtons(
+                    isRunning: provider.isRunning,
+                    onStartPause: provider.isRunning ? provider.pauseTimer : provider.startTimer,
+                    onReset: provider.resetTimer,
                   ),
-                  const SizedBox(width: 20),
-                  SizedBox(
-                    width: 120,
-                    height: 50,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.grey[800],
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(25),
-                        ),
-                      ),
-                      onPressed: _resetTimer,
-                      child: const Text(
-                        '초기화',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
