@@ -178,13 +178,28 @@ class _SettingsDialogState extends State<SettingsDialog> {
                                   key: ValueKey('${tempExercises[index]}_$index'),
                                   leading: const Icon(Icons.drag_handle, color: AppConstants.secondaryText),
                                   title: Text(tempExercises[index], style: const TextStyle(color: AppConstants.primaryText)),
-                                  trailing: IconButton(
-                                    icon: const Icon(Icons.delete, color: AppConstants.accentRed, size: 20),
-                                    onPressed: () {
-                                      setDetailState(() {
-                                        tempExercises.removeAt(index);
-                                      });
-                                    },
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.edit, color: AppConstants.primaryBlue, size: 20),
+                                        onPressed: () {
+                                          _showInputDialog(context, '종목 이름 변경', '새로운 이름을 입력하세요', (newName) {
+                                            setDetailState(() {
+                                              tempExercises[index] = newName;
+                                            });
+                                          }, initialText: tempExercises[index]);
+                                        },
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.delete, color: AppConstants.accentRed, size: 20),
+                                        onPressed: () {
+                                          setDetailState(() {
+                                            tempExercises.removeAt(index);
+                                          });
+                                        },
+                                      ),
+                                    ],
                                   ),
                                 );
                               },

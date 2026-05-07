@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -10,6 +11,7 @@ import 'package:provider/provider.dart';
 import '../constants.dart';
 import '../models/workout_record.dart';
 import '../providers/auth_provider.dart';
+import 'share_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -234,11 +236,21 @@ class ProfileScreen extends StatelessWidget {
             final data = docs[index].data() as Map<String, dynamic>;
             final record = WorkoutRecord.fromJson(data);
             final routineName = data['routineName'] as String? ?? '기본 운동';
+            
+            // Firestore의 Map 데이터에서 추가된 상세 정보 수동 추출 (구버전 호환성 고려)
+            final memo = data['memo'] as String?;
+            final setDetailsDynamic = data['setDetails'] as List<dynamic>?;
+            final setDetails = setDetailsDynamic
+                ?.map((e) => Map<String, dynamic>.from(e as Map))
+                .toList();
+
             return WorkoutTimelineCard(
               record: record, 
               isLast: index == docs.length - 1,
               userId: uid,
               routineName: routineName,
+              memo: memo,
+              setDetails: setDetails,
             );
           },
         );
@@ -247,11 +259,13 @@ class ProfileScreen extends StatelessWidget {
   }
 }
 
-class WorkoutTimelineCard extends StatelessWidget {
+class WorkoutTimelineCard extends StatefulWidget {
   final WorkoutRecord record;
   final bool isLast;
   final String userId;
   final String routineName;
+  final String? memo;
+  final List<Map<String, dynamic>>? setDetails;
 
   const WorkoutTimelineCard({
     super.key, 
@@ -259,7 +273,16 @@ class WorkoutTimelineCard extends StatelessWidget {
     required this.isLast,
     required this.userId,
     required this.routineName,
+    this.memo,
+    this.setDetails,
   });
+
+  @override
+  State<WorkoutTimelineCard> createState() => _WorkoutTimelineCardState();
+}
+
+class _WorkoutTimelineCardState extends State<WorkoutTimelineCard> {
+  bool _isExpanded = false;
 
   String _formatTotalTime(int ms) {
     int hours = (ms ~/ 3600000);
@@ -301,10 +324,11 @@ class WorkoutTimelineCard extends StatelessWidget {
                     border: Border.all(color: AppConstants.backgroundColor, width: 2),
                   ),
                 ),
-                if (!isLast)
+                if (!widget.isLast)
                   Expanded(
                     child: Container(
                       width: 2,
+                      // ignore: deprecated_member_use
                       color: AppConstants.secondaryText.withOpacity(0.3),
                     ),
                   ),
@@ -341,7 +365,7 @@ class WorkoutTimelineCard extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              _formatDate(record.date),
+                              _formatDate(widget.record.date),
                               style: GoogleFonts.poppins(
                                 fontSize: 14,
                                 color: AppConstants.secondaryText,
@@ -350,7 +374,7 @@ class WorkoutTimelineCard extends StatelessWidget {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              routineName,
+                              widget.routineName,
                               style: GoogleFonts.notoSansKr(
                                 fontSize: 16,
                                 color: AppConstants.primaryBlue,
@@ -361,14 +385,32 @@ class WorkoutTimelineCard extends StatelessWidget {
                         ),
                       Row(
                         children: [
+                          InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ShareScreen(
+                                    record: widget.record, 
+                                    routineName: widget.routineName,
+                                    setDetails: widget.setDetails,
+                                    memo: widget.memo,
+                                  ),
+                                ),
+                              );
+                            },
+                            child: const Icon(Icons.ios_share, size: 20, color: AppConstants.secondaryText),
+                          ),
+                          const SizedBox(width: 12),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
+                              // ignore: deprecated_member_use
                               color: AppConstants.accentRed.withOpacity(0.15),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
-                              _formatTotalTime(record.totalTimeMs),
+                              _formatTotalTime(widget.record.totalTimeMs),
                               style: GoogleFonts.poppins(color: AppConstants.accentRed, fontWeight: FontWeight.bold, fontSize: 12),
                             ),
                             ),
@@ -382,7 +424,27 @@ class WorkoutTimelineCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    ...record.exercises.asMap().entries.map((entry) {
+                    if (widget.memo != null && widget.memo!.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: AppConstants.backgroundColor, borderRadius: BorderRadius.circular(8)),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.format_quote, size: 16, color: AppConstants.secondaryText),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                widget.memo!,
+                                style: GoogleFonts.notoSansKr(fontSize: 14, color: AppConstants.primaryText, fontStyle: FontStyle.italic),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    ...widget.record.exercises.asMap().entries.map((entry) {
                       int idx = entry.key;
                       ExerciseSet ex = entry.value;
                       return Padding(
@@ -423,7 +485,67 @@ class WorkoutTimelineCard extends StatelessWidget {
                           ],
                         ),
                       );
-                    }).toList(),
+                    }),
+                    if (widget.setDetails != null && widget.setDetails!.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      // ignore: deprecated_member_use
+                      Divider(color: AppConstants.secondaryText.withOpacity(0.2)),
+                      InkWell(
+                        onTap: () => setState(() => _isExpanded = !_isExpanded),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(_isExpanded ? '상세 기록 접기' : '상세 기록 보기', style: GoogleFonts.notoSansKr(fontSize: 13, color: AppConstants.secondaryText)),
+                              Icon(_isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 16, color: AppConstants.secondaryText)
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (_isExpanded)
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(color: AppConstants.backgroundColor, borderRadius: BorderRadius.circular(8)),
+                          child: Builder(builder: (context) {
+                            final setDetailsList = widget.setDetails!;
+                            return Column(
+                                children: setDetailsList.asMap().entries.map((entry) {
+                              int setIndex = entry.key;
+                              Map<String, dynamic> setMap = entry.value;
+                              final exName = setMap['exercise'] ?? '운동';
+                              final setNum = setMap['set'] ?? 1;
+                              final timeMs = setMap['timeMs'] ?? 0;
+                              final timeStr = (timeMs > 0) ? '${timeMs ~/ 1000}초' : '-';
+                              final weightText = setMap['weight'] != null ? '${setMap['weight']}kg' : '(무게 입력)';
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                                child: Row(
+                                  children: [
+                                    Expanded(flex: 2, child: Text('$exName $setNum세트', style: GoogleFonts.notoSansKr(fontSize: 13, color: AppConstants.primaryText))),
+                                    Expanded(
+                                      flex: 1,
+                                      child: InkWell(
+                                        onTap: () => _showEditWeightDialog(context, setIndex, setMap['weight']),
+                                        child: Text(
+                                          weightText,
+                                          style: GoogleFonts.notoSansKr(
+                                            fontSize: 13,
+                                            color: setMap['weight'] != null ? AppConstants.secondaryText : AppConstants.primaryBlue,
+                                            fontStyle: setMap['weight'] != null ? FontStyle.normal : FontStyle.italic,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(flex: 1, child: Text(timeStr, style: GoogleFonts.notoSansKr(fontSize: 13, color: AppConstants.secondaryText), textAlign: TextAlign.right)),
+                                  ],
+                                ),
+                              );
+                            }).toList());
+                          }),
+                        )
+                    ]
                   ],
                 ),
               ),
@@ -432,6 +554,71 @@ class WorkoutTimelineCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  void _showEditWeightDialog(BuildContext context, int setIndex, dynamic currentWeight) {
+    final TextEditingController controller = TextEditingController(text: currentWeight?.toString() ?? '');
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppConstants.dialogBackground,
+          title: Text('수행 무게 입력/수정', style: GoogleFonts.notoSansKr(color: AppConstants.primaryText)),
+          content: TextField(
+            controller: controller,
+            style: GoogleFonts.notoSansKr(color: AppConstants.primaryText),
+            decoration: InputDecoration(
+              hintText: '무게 (kg)',
+              hintStyle: GoogleFonts.notoSansKr(color: AppConstants.secondaryText),
+              suffixText: 'kg',
+              enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppConstants.secondaryText)),
+              focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppConstants.primaryBlue)),
+            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('취소', style: GoogleFonts.notoSansKr(color: AppConstants.secondaryText)),
+            ),
+            TextButton(
+              onPressed: () {
+                final newWeightStr = controller.text.trim();
+                Navigator.pop(context);
+                if (newWeightStr.isNotEmpty) {
+                  final newWeight = double.tryParse(newWeightStr);
+                  if (newWeight != null) {
+                    _updateSetWeight(setIndex, newWeight);
+                  }
+                } else {
+                  _updateSetWeight(setIndex, null); // 입력값을 지우면 null로 저장
+                }
+              },
+              child: Text('저장', style: GoogleFonts.notoSansKr(color: AppConstants.primaryBlue)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _updateSetWeight(int setIndex, double? newWeight) async {
+    try {
+      final docRef = FirebaseFirestore.instance.collection('users').doc(widget.userId).collection('workouts').doc(widget.record.id);
+      final docSnap = await docRef.get();
+      if (docSnap.exists && docSnap.data()!['setDetails'] != null) {
+        List<Map<String, dynamic>> updatedSetDetails = (docSnap.data()!['setDetails'] as List<dynamic>)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        if (setIndex < updatedSetDetails.length) {
+          updatedSetDetails[setIndex]['weight'] = newWeight;
+          await docRef.update({'setDetails': updatedSetDetails});
+        }
+      }
+    } catch (e) {
+      debugPrint('Error updating set weight: $e');
+    }
   }
 
   void _showEditExerciseDialog(BuildContext context, ExerciseSet ex, int index) {
@@ -489,7 +676,7 @@ class WorkoutTimelineCard extends StatelessWidget {
             TextButton(
               onPressed: () {
                 Navigator.pop(context);
-                FirebaseFirestore.instance.collection('users').doc(userId).collection('workouts').doc(record.id).delete();
+                FirebaseFirestore.instance.collection('users').doc(widget.userId).collection('workouts').doc(widget.record.id).delete();
               },
               child: Text('삭제', style: GoogleFonts.notoSansKr(color: AppConstants.accentRed)),
             ),
@@ -503,9 +690,9 @@ class WorkoutTimelineCard extends StatelessWidget {
     try {
       final docRef = FirebaseFirestore.instance
           .collection('users')
-          .doc(userId)
+          .doc(widget.userId)
           .collection('workouts')
-          .doc(record.id);
+          .doc(widget.record.id);
 
       final docSnap = await docRef.get();
       if (docSnap.exists) {
@@ -521,9 +708,26 @@ class WorkoutTimelineCard extends StatelessWidget {
           target: oldEx.target,
         );
 
-        await docRef.update({
+        final oldExName = oldEx.exerciseName;
+        List<Map<String, dynamic>> updatedSetDetails = [];
+        if (data['setDetails'] != null) {
+          updatedSetDetails = (data['setDetails'] as List<dynamic>)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+              
+          for (var detail in updatedSetDetails) {
+            if (detail['exercise'] == oldExName) {
+              detail['exercise'] = newName; // 상세 기록 속 이름도 동기화 
+            }
+          }
+        }
+
+        final updateData = <String, dynamic>{
           'exercises': updatedExercises.map((e) => e.toJson()).toList(),
-        });
+        };
+        if (updatedSetDetails.isNotEmpty) updateData['setDetails'] = updatedSetDetails;
+
+        await docRef.update(updateData);
       }
     } catch (e) {
       debugPrint('Error updating exercise name: $e');

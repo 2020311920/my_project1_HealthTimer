@@ -12,6 +12,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../constants.dart';
 import '../models/workout_record.dart';
 
+class WorkoutResult {
+  final WorkoutRecord record;
+  final List<Map<String, dynamic>> setDetails;
+  final String memo;
+  WorkoutResult({required this.record, required this.setDetails, required this.memo});
+}
+
 class WorkoutTimerProvider extends ChangeNotifier {
   int _milliseconds = 0;
   Timer? _timer;
@@ -30,6 +37,10 @@ class WorkoutTimerProvider extends ChangeNotifier {
   int _selectedRoutineIndex = 0;  // 현재 선택된 운동 부위 인덱스
   bool _isWorkoutStarted = false; 
   int _totalMilliseconds = 0;     
+  bool _hasShownInitialSettings = false; // 앱 초기 실행 시 설정 창 표시 여부
+  int _currentSetActiveMs = 0; // 현재 세트의 순수 운동 시간 (밀리초)
+  List<Map<String, dynamic>> _setDetails = []; // 각 세트별 초정밀 데이터 기록
+  String _workoutMemo = ''; // 실시간 운동 메모
 
   final AudioPlayer _audioPlayer = AudioPlayer();
 
@@ -49,6 +60,10 @@ class WorkoutTimerProvider extends ChangeNotifier {
   bool get isWorkoutStarted => _isWorkoutStarted;
   int get totalMilliseconds => _totalMilliseconds;
   AppLifecycleState get appState => _appState;
+  bool get hasShownInitialSettings => _hasShownInitialSettings;
+  int get currentSetActiveMs => _currentSetActiveMs;
+  List<Map<String, dynamic>> get setDetails => _setDetails;
+  String get workoutMemo => _workoutMemo;
 
   WorkoutTimerProvider() {
     FirebaseAuth.instance.authStateChanges().listen((user) {
@@ -59,6 +74,15 @@ class WorkoutTimerProvider extends ChangeNotifier {
 
   void setAppState(AppLifecycleState state) {
     _appState = state;
+  }
+
+  void markInitialSettingsShown() {
+    _hasShownInitialSettings = true;
+  }
+
+  void updateMemo(String memo) {
+    _workoutMemo = memo;
+    notifyListeners();
   }
 
   Future<void> _loadSettings() async {
@@ -187,6 +211,18 @@ class WorkoutTimerProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> renameExercise(int routineIndex, int exerciseIndex, String newName) async {
+    if (routineIndex >= 0 && routineIndex < _routines.length) {
+      List<String> exercises = List<String>.from(_routines[routineIndex]['exercises'] ?? []);
+      if (exerciseIndex >= 0 && exerciseIndex < exercises.length) {
+        exercises[exerciseIndex] = newName.trim();
+        _routines[routineIndex]['exercises'] = exercises;
+        notifyListeners();
+        await saveRoutines(_routines);
+      }
+    }
+  }
+
   @override
   void dispose() {
     _timer?.cancel();
@@ -203,6 +239,10 @@ class WorkoutTimerProvider extends ChangeNotifier {
 
     _milliseconds += elapsedMs;
     _totalMilliseconds += elapsedMs; 
+
+    if (!_isResting) {
+      _currentSetActiveMs += elapsedMs; // 순수 운동 시간 누적
+    }
 
     if (_isResting) {
       int targetMs = _targetRestSeconds * 1000;
@@ -255,6 +295,9 @@ class WorkoutTimerProvider extends ChangeNotifier {
     _isResting = false;
     _lastTickTime = null;
     _lastNotificationSeconds = 0;
+    _currentSetActiveMs = 0;
+    _setDetails.clear();
+    _workoutMemo = '';
     
     if (_appState != AppLifecycleState.resumed) _updateNotification();
     notifyListeners();
@@ -263,6 +306,9 @@ class WorkoutTimerProvider extends ChangeNotifier {
   void previousState() {
     HapticFeedback.lightImpact();
     if (_isResting) {
+      if (_setDetails.isNotEmpty) {
+        _setDetails.removeLast(); // 쉬는 시간에 이전으로 갈 경우 직전 세트 기록 무조건 파기 방지(중복 방지)
+      }
       if (_currentSet > 1) {
         _currentSet--;
         _isResting = false;
@@ -285,6 +331,13 @@ class WorkoutTimerProvider extends ChangeNotifier {
   void nextState() {
     HapticFeedback.lightImpact();
     if (!_isResting) {
+      _setDetails.add({
+        'exercise': _getExerciseNameForIndex(_currentExercise),
+        'set': _currentSet,
+        'timeMs': _currentSetActiveMs,
+        'weight': null, // 추후 사용자가 입력할 무게
+      });
+      _currentSetActiveMs = 0; // 초기화
       if (_currentSet >= _maxSets) {
         _currentExercise++; 
         _currentSet = 1;
@@ -312,6 +365,13 @@ class WorkoutTimerProvider extends ChangeNotifier {
     _isWorkoutStarted = true; 
 
     if (!_isResting) {
+      _setDetails.add({
+        'exercise': _getExerciseNameForIndex(_currentExercise),
+        'set': _currentSet,
+        'timeMs': _currentSetActiveMs,
+        'weight': null,
+      });
+      _currentSetActiveMs = 0;
       if (_currentSet >= _maxSets) {
         _currentExercise++; 
         _currentSet = 1;
@@ -329,8 +389,8 @@ class WorkoutTimerProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> endWorkout() async {
-    if (!_isWorkoutStarted) return;
+  Future<WorkoutResult?> endWorkout({bool includeCurrentSet = false}) async {
+    if (!_isWorkoutStarted) return null;
     
     _timer?.cancel();
     _isRunning = false; 
@@ -343,11 +403,30 @@ class WorkoutTimerProvider extends ChangeNotifier {
     final String key = '${uid}_${AppConstants.keyWorkoutRecords(today)}';
     List<String> records = prefs.getStringList(key) ?? [];
 
+    List<Map<String, dynamic>> finalSetDetails = List.from(_setDetails);
+    String finalMemo = _workoutMemo;
+
+    // 실제 완수한 세트 계산 (쉬는 시간 중이면 방금 넘어온 것이므로 1을 뺌)
+    int actualCompletedSets = _currentSet - 1;
+    if (!_isResting && includeCurrentSet) {
+      actualCompletedSets += 1;
+      finalSetDetails.add({
+        'exercise': _getExerciseNameForIndex(_currentExercise),
+        'set': _currentSet,
+        'timeMs': _currentSetActiveMs,
+        'weight': null,
+      });
+    }
+
     List<ExerciseSet> exercisesList = [];
     for (int i = 1; i < _currentExercise; i++) {
       exercisesList.add(ExerciseSet(exerciseNum: i, exerciseName: _getExerciseNameForIndex(i), completed: _maxSets, target: _maxSets));
     }
-    exercisesList.add(ExerciseSet(exerciseNum: _currentExercise, exerciseName: _getExerciseNameForIndex(_currentExercise), completed: _currentSet, target: _maxSets));
+    
+    // 현재 진행 중이던 종목의 완료 세트가 0보다 크거나 첫 번째 종목일 경우 추가
+    if (actualCompletedSets > 0 || _currentExercise == 1) {
+      exercisesList.add(ExerciseSet(exerciseNum: _currentExercise, exerciseName: _getExerciseNameForIndex(_currentExercise), completed: actualCompletedSets, target: _maxSets));
+    }
 
     WorkoutRecord newRecord = WorkoutRecord(
       id: DateTime.now().millisecondsSinceEpoch.toString(), 
@@ -358,6 +437,8 @@ class WorkoutTimerProvider extends ChangeNotifier {
 
     final Map<String, dynamic> recordJson = newRecord.toJson();
     recordJson['routineName'] = _routines.isNotEmpty ? _routines[_selectedRoutineIndex]['part'] : '기본 운동';
+    recordJson['setDetails'] = finalSetDetails; 
+    recordJson['memo'] = finalMemo;
 
     records.add(jsonEncode(recordJson));
     await prefs.setStringList(key, records);
@@ -383,9 +464,14 @@ class WorkoutTimerProvider extends ChangeNotifier {
     _isResting = false;
     _isWorkoutStarted = false;
     _lastTickTime = null;
+    _currentSetActiveMs = 0;
+    _setDetails.clear();
+    _workoutMemo = '';
 
     if (_appState != AppLifecycleState.resumed) _updateNotification();
     notifyListeners();
+
+    return WorkoutResult(record: newRecord, setDetails: finalSetDetails, memo: finalMemo);
   }
 
   String formatTime(int ms) {
