@@ -216,11 +216,20 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                 final data = selectedDateEvents[index].data() as Map<String, dynamic>;
                                 final record = WorkoutRecord.fromJson(data);
                                 final routineName = data['routineName'] as String? ?? '기본 운동';
+                                
+                                final memo = data['memo'] as String?;
+                                final setDetailsDynamic = data['setDetails'] as List<dynamic>?;
+                                final setDetails = setDetailsDynamic
+                                    ?.map((e) => Map<String, dynamic>.from(e as Map))
+                                    .toList();
+
                                 return WorkoutTimelineCard(
                                   record: record,
                                   isLast: index == selectedDateEvents.length - 1,
                                   userId: user.uid,
                                   routineName: routineName,
+                                  memo: memo,
+                                  setDetails: setDetails,
                                 );
                               },
                             ),
