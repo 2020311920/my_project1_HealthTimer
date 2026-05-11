@@ -6,7 +6,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     
     <application
-        android:label="헬스 타이머"
+        android:label="개지리는 타이머"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
         <activity
