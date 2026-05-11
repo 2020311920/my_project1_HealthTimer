@@ -1,18 +1,25 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:provider/provider.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'firebase_options.dart';
+import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
+import 'package:provider/provider.dart';
 
 import 'constants.dart';
-import 'screens/timer_screen.dart';
-import 'screens/login_screen.dart';
-import 'providers/workout_timer_provider.dart';
+import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
+import 'providers/workout_timer_provider.dart';
+import 'screens/login_screen.dart';
+import 'screens/timer_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Kakao SDK Init
+  KakaoSdk.init(
+    nativeAppKey: '23b57005abe75c68eea324644ab609db',
+  );
+
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );

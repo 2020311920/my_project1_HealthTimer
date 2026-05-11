@@ -31,6 +31,7 @@ class WorkoutTimerProvider extends ChangeNotifier {
   int _targetRestSeconds = AppConstants.defaultRestSeconds; 
   bool _isResting = false;     
   bool _isBeepEnabled = AppConstants.defaultBeepEnabled;  
+  int _timerTheme = 0; // 0: 기본(Glow), 1: 프로그레스 바(Neon), 2: 미니멀(Minimal), 3: 네온 글로우(Cyberpunk)
   
   int _currentExercise = 1;       
   List<Map<String, dynamic>> _routines = [{'part': '기본 운동', 'exercises': <String>[]}]; // 기본 운동은 항상 존재
@@ -54,6 +55,7 @@ class WorkoutTimerProvider extends ChangeNotifier {
   int get targetRestSeconds => _targetRestSeconds;
   bool get isResting => _isResting;
   bool get isBeepEnabled => _isBeepEnabled;
+  int get timerTheme => _timerTheme;
   int get currentExercise => _currentExercise;
   List<Map<String, dynamic>> get routines => _routines;
   int get selectedRoutineIndex => _selectedRoutineIndex;
@@ -93,6 +95,7 @@ class WorkoutTimerProvider extends ChangeNotifier {
     _maxSets = prefs.getInt('${uid}_${AppConstants.keyMaxSets}') ?? AppConstants.defaultMaxSets;
     _targetRestSeconds = prefs.getInt('${uid}_${AppConstants.keyRestSeconds}') ?? AppConstants.defaultRestSeconds;
     _isBeepEnabled = prefs.getBool('${uid}_${AppConstants.keyIsBeepEnabled}') ?? AppConstants.defaultBeepEnabled;
+    _timerTheme = prefs.getInt('${uid}_timerTheme') ?? 0;
     _selectedRoutineIndex = prefs.getInt('${uid}_selectedRoutineIndex') ?? 0;
     
     final routinesString = prefs.getString('${uid}_routines');
@@ -116,10 +119,12 @@ class WorkoutTimerProvider extends ChangeNotifier {
             _maxSets = settings['maxSets'] ?? _maxSets;
             _targetRestSeconds = settings['restSeconds'] ?? _targetRestSeconds;
             _isBeepEnabled = settings['isBeepEnabled'] ?? _isBeepEnabled;
+            _timerTheme = settings['timerTheme'] ?? _timerTheme;
 
             await prefs.setInt('${uid}_${AppConstants.keyMaxSets}', _maxSets);
             await prefs.setInt('${uid}_${AppConstants.keyRestSeconds}', _targetRestSeconds);
             await prefs.setBool('${uid}_${AppConstants.keyIsBeepEnabled}', _isBeepEnabled);
+            await prefs.setInt('${uid}_timerTheme', _timerTheme);
           }
           if (data.containsKey('routines')) {
             final loadedRoutines = List<Map<String, dynamic>>.from(data['routines']);
@@ -141,10 +146,11 @@ class WorkoutTimerProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> saveSettings(int newMaxSets, int newRestSeconds, bool newIsBeepEnabled) async {
+  Future<void> saveSettings(int newMaxSets, int newRestSeconds, bool newIsBeepEnabled, int newTimerTheme) async {
     _maxSets = newMaxSets;
     _targetRestSeconds = newRestSeconds;
     _isBeepEnabled = newIsBeepEnabled;
+    _timerTheme = newTimerTheme;
     notifyListeners();
 
     final user = FirebaseAuth.instance.currentUser;
@@ -154,6 +160,7 @@ class WorkoutTimerProvider extends ChangeNotifier {
     await prefs.setInt('${uid}_${AppConstants.keyMaxSets}', _maxSets);
     await prefs.setInt('${uid}_${AppConstants.keyRestSeconds}', _targetRestSeconds);
     await prefs.setBool('${uid}_${AppConstants.keyIsBeepEnabled}', _isBeepEnabled);
+    await prefs.setInt('${uid}_timerTheme', _timerTheme);
 
     if (user != null) {
       try {
@@ -162,6 +169,7 @@ class WorkoutTimerProvider extends ChangeNotifier {
             'maxSets': _maxSets,
             'restSeconds': _targetRestSeconds,
             'isBeepEnabled': _isBeepEnabled,
+            'timerTheme': _timerTheme,
           }
         }, SetOptions(merge: true));
       } catch (e) {

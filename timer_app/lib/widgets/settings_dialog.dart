@@ -8,12 +8,14 @@ class SettingsDialog extends StatefulWidget {
   final int initialMaxSets;
   final int initialRestSeconds;
   final bool initialBeepEnabled;
+  final int initialTimerTheme;
 
   const SettingsDialog({
     super.key,
     required this.initialMaxSets,
     required this.initialRestSeconds,
     required this.initialBeepEnabled,
+    required this.initialTimerTheme,
   });
 
   @override
@@ -24,6 +26,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
   late int tempMaxSets;
   late int tempRestSeconds;
   late bool tempBeepEnabled;
+  late int tempTimerTheme;
 
   @override
   void initState() {
@@ -31,6 +34,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
     tempMaxSets = widget.initialMaxSets;
     tempRestSeconds = widget.initialRestSeconds;
     tempBeepEnabled = widget.initialBeepEnabled;
+    tempTimerTheme = widget.initialTimerTheme;
   }
 
   void _openRoutineManager(BuildContext context) {
@@ -291,6 +295,31 @@ class _SettingsDialogState extends State<SettingsDialog> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+                const Text('타이머 테마:', style: TextStyle(color: AppConstants.primaryText, fontSize: 16)),
+                DropdownButton<int>(
+                  value: tempTimerTheme,
+                  dropdownColor: AppConstants.dialogBackground,
+                  style: const TextStyle(color: AppConstants.primaryText),
+                  items: const [
+                    DropdownMenuItem(value: 0, child: Text('기본 (Glow)')),
+                    DropdownMenuItem(value: 1, child: Text('원형 바 (Neon)')),
+                    DropdownMenuItem(value: 2, child: Text('미니멀 (Minimal)')),
+                    DropdownMenuItem(value: 3, child: Text('사이버펑크')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() {
+                        tempTimerTheme = value;
+                      });
+                    }
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
                 const Text('목표 세트 수:', style: TextStyle(color: AppConstants.primaryText, fontSize: 16)),
                 Row(
                   children: [
@@ -361,6 +390,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
               'maxSets': tempMaxSets,
               'restSeconds': tempRestSeconds,
               'isBeepEnabled': tempBeepEnabled,
+              'timerTheme': tempTimerTheme,
             });
           },
           child: const Text('저장', style: TextStyle(color: AppConstants.primaryBlue)),

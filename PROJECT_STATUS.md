@@ -34,16 +34,25 @@
 - **🔥 코어 데이터 유실 및 중복 버그 완벽 픽스 완료**: 타이머에서 '스킵(재시작)' 시 세트 기록이 증발하던 문제와 '이전' 시 세트 기록이 중복되던 로직 수정. 프로필에서 운동 종목 이름 변경 시 `setDetails` 동기화가 끊겨 공유 화면에서 데이터가 안 보이던 심각한 파편화 현상 완벽 해결.
 - **🚀 운동 기록 공유 크래시(튕김) 및 UI 결함 완벽 픽스**: 운동량이 많아 상세 기록 텍스트가 매우 길어졌을 때 발생하는 UI Overflow 에러와 이미지 디코딩 메모리 초과(OOM) 문제 해결. `ConstrainedBox`와 `SingleChildScrollView`를 도입해 텍스트 스크롤을 허용하고, 캡처 해상도(`pixelRatio`)를 2.0으로 낮춰 튕김 현상을 완벽 방어함. 무게 미입력 시 '맨몸' 텍스트를 제거하고 공란으로 자연스럽게 표시되도록 수정 완료.
 - **공유 화면 레이아웃 토글 기능 추가 완료**: 운동 기록이 길어질 경우를 대비하여, 기존의 1열 스크롤 방식과 함께 2열 그리드 방식으로 상세 기록을 볼 수 있는 레이아웃 전환 기능을 추가하여 사용성을 개선함.
+- **카카오 로그인 연동 완료**: `kakao_flutter_sdk_user`를 이용한 네이티브 카카오 로그인 및 Firebase OIDC(OpenID Connect) 연동 로직 구축 완료. 로그인 화면(`login_screen.dart`) UI 업데이트 적용.
+- **카카오 로그인 크래시 픽스 완료**: 카카오 로그인 시 발생하는 ClassNotFoundException 오류 원인이 `kakao_flutter_sdk_user` v2 업데이트로 인한 패키지 경로 변경임을 확인. `AndroidManifest.xml`의 액티비티 이름을 `com.kakao.sdk.flutter.auth.AuthCodeHandlerActivity`로 정확히 수정하여 튕김 현상 완벽 해결.
+- **Firebase OIDC 카카오 로그인 인증 에러 식별 및 원인 분석 완료**: 카카오 로그인 성공 후 Firebase 인증 시 발생하는 `[firebase_auth/invalid-credential] The audience in ID Token does not match` 에러 확인. 앱 측 코드는 정상적으로 '네이티브 앱 키'를 사용 중이므로 코드 문제가 아님. **Firebase Console에서 OIDC(Kakao)의 클라이언트 ID를 '네이티브 앱 키(23b570...)'로 변경해야 함.**
+- **메인 화면(TimerScreen) 리팩토링 및 다중 테마 시스템 도입 완료**:
+  - 기본 메인 화면 디자인을 이전의 심플한 Glow 형태로 되돌림 (기본값 설정).
+  - 커스텀 페인트 등을 최적화하여 앱이 무거워지지 않고 안정적으로 작동하도록 보수 및 기능 유지 완료.
+  - 사용자가 **설정(Settings)**에서 직접 4가지 타이머 테마 중 하나를 선택할 수 있도록 기능 추가.
+  - 🎨 **테마 목록**: 1) 기본 (Glow), 2) 원형 바 (Neon CustomPaint), 3) 미니멀 (Minimal - 테두리만), 4) 사이버펑크 (Cyberpunk - 강렬한 색상과 폰트).
 
 ## 🚧 미완성 및 향후 개발 항목 (To-Do)
-1. **메인 화면(TimerScreen) 리팩토링**
-   - 트렌디한 원형 타이머 프로그레스 바 적용 및 전반적인 여백/글꼴 튜닝 진행 필요.
+1. **Firebase Console 설정 업데이트 (수동 작업 필요)**
+   - Authentication -> Sign-in method -> OIDC(kakao) 설정 접속.
+   - Client ID 항목의 값을 기존 REST API 키에서 `23b57005abe75c68eea324644ab609db` (네이티브 앱 키)로 변경.
 
 ## 🛠️ 다음 개발 스텝 (Next Steps)
-1. **메인 화면 리팩토링**: 사용자 첫인상인 타이머 화면을 더욱 감각적이고 매끄러운 디자인으로 업데이트.
+1. **추가 디테일 개선 및 사용자 피드백 반영**: 향후 필요한 추가 기능이나 세부 애니메이션 개선 기획.
 
 ---
-*마지막 업데이트: 2026-05-07*
+*마지막 업데이트: 2026-05-11*
 
 **[참고]** 
 프로젝트 세팅 이슈: Firebase Console 내에서 `Firestore Database`와 `Storage`를 활성화(Get Started)해야 프로필 이미지 저장 및 운동 기록 동기화가 정상 작동함.
