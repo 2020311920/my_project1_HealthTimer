@@ -55,6 +55,7 @@ class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
           initialMaxSets: _provider.maxSets,
           initialRestSeconds: _provider.targetRestSeconds,
           initialBeepEnabled: _provider.isBeepEnabled,
+          initialTimerTheme: _provider.timerTheme,
         );
       },
     );
@@ -64,6 +65,7 @@ class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
         result['maxSets'] as int,
         result['restSeconds'] as int,
         result['isBeepEnabled'] as bool,
+        result['timerTheme'] as int,
       );
     }
   }

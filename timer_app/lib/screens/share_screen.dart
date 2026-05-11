@@ -31,20 +31,25 @@ class _ShareScreenState extends State<ShareScreen> {
   final GlobalKey _globalKey = GlobalKey();
   File? _backgroundImage;
   bool _isCapturing = false;
+  
+  // 텍스트 이동 및 확대 축소 제어용
   Offset _textPosition = const Offset(24, 40);
+  double _textScale = 1.0;
+  double _baseScale = 1.0;
+
   String _customTitle = '오늘도 오운완! 💪';
-  int _selectedTemplate = 0; // 0: Sporty, 1: Neon, 2: Strava, 3: Polaroid, 4: Vintage
+  int _selectedTemplate = 0; // 0: Sporty, 1: Neon, 2: Strava, 3: Polaroid, 4: Vintage, 5: Modern
   bool _isDetailedMode = false;
-  int _selectedFontIndex = 0; // 폰트 토글 (0: 기본, 1: 손글씨, 2: 둥근체, 3: 굵은체)
-  bool _isTwoColumnLayout = false; // 1열/2열 레이아웃 토글
-  final Map<String, bool> _expandedExercises = {}; // 종목별 펼침 상태
+  int _selectedFontIndex = 0;
+  bool _isTwoColumnLayout = false;
+  final Map<String, bool> _expandedExercises = {};
 
   @override
   void initState() {
     super.initState();
     _backgroundImage = widget.initialImage;
     for (var ex in widget.record.exercises) {
-      _expandedExercises[ex.exerciseName] = true; // 기본적으로 모두 펼친 상태
+      _expandedExercises[ex.exerciseName] = false; // 화면 차지를 줄이기 위해 기본 접힘 상태
     }
   }
 
@@ -116,18 +121,15 @@ class _ShareScreenState extends State<ShareScreen> {
     });
 
     try {
-      // 화면 렌더링 캡처
       RenderRepaintBoundary boundary = _globalKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-      ui.Image image = await boundary.toImage(pixelRatio: 2.0); // 메모리 초과 방지(OOM 대비)를 위해 해상도 하향 조정
+      ui.Image image = await boundary.toImage(pixelRatio: 2.0);
       ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       Uint8List pngBytes = byteData!.buffer.asUint8List();
 
-      // 임시 폴더에 저장
       final directory = await getTemporaryDirectory();
       final imgFile = File('${directory.path}/workout_share.png');
       await imgFile.writeAsBytes(pngBytes);
 
-      // Share Plus로 공유
       await Share.shareXFiles(
         [XFile(imgFile.path)],
         text: '$_customTitle #HealthTimer',
@@ -218,7 +220,7 @@ class _ShareScreenState extends State<ShareScreen> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('${widget.routineName} · ${widget.record.exercises.length}종목 · $totalSets세트', style: _getCustomFont(color: textColor, fontSize: 14, fontWeight: FontWeight.w600)),
+              Flexible(child: Text('${widget.routineName} · ${widget.record.exercises.length}종목 · $totalSets세트', style: _getCustomFont(color: textColor, fontSize: 14, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
               if (!_isCapturing) ...[
                 const SizedBox(width: 4),
                 Icon(_isDetailedMode ? Icons.expand_less : Icons.expand_more, color: textColor.withOpacity(0.5), size: 16),
@@ -238,13 +240,23 @@ class _ShareScreenState extends State<ShareScreen> {
           if (_isTwoColumnLayout)
             _buildTwoColumnDetails(textColor)
           else
-            ...widget.record.exercises.map((ex) {
-              bool isExpanded = _expandedExercises[ex.exerciseName] ?? true;
+            ...widget.record.exercises.asMap().entries.map((entry) {
+              int index = entry.key;
+              var ex = entry.value;
+              bool isExpanded = _expandedExercises[ex.exerciseName] ?? false;
               List<Map<String, dynamic>> details = [];
-              if (widget.setDetails != null) {
+              if (widget.setDetails != null && widget.setDetails!.isNotEmpty) {
+                // 사용자가 운동 이름을 변경했더라도 순서를 기반으로 과거 이름과 매핑
+                List<String> uniqueOldNames = [];
+                for (var d in widget.setDetails!) {
+                  String name = d['exercise'] as String;
+                  if (!uniqueOldNames.contains(name)) uniqueOldNames.add(name);
+                }
+                String? targetOldName = (index < uniqueOldNames.length) ? uniqueOldNames[index] : ex.exerciseName;
+
                 details = widget.setDetails!
                     .map((e) => Map<String, dynamic>.from(e as Map))
-                    .where((d) => d['exercise'] == ex.exerciseName)
+                    .where((d) => d['exercise'] == targetOldName)
                     .toList();
               }
               return Column(
@@ -257,7 +269,7 @@ class _ShareScreenState extends State<ShareScreen> {
                       children: [
                         if (!_isCapturing) 
                           Icon(isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right, color: textColor, size: 14),
-                        Text('${ex.exerciseName} ${ex.completed}/${ex.target}세트', style: _getCustomFont(color: textColor, fontSize: 13, fontWeight: FontWeight.bold)),
+                        Flexible(child: Text('${ex.exerciseName} ${ex.completed}/${ex.target}세트', style: _getCustomFont(color: textColor, fontSize: 13, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                       ],
                     ),
                   ),
@@ -272,11 +284,11 @@ class _ShareScreenState extends State<ShareScreen> {
                                 int timeMs = d['timeMs'] as int? ?? 0;
                                 String timeStr = timeMs > 0 ? _formatSetTime(timeMs) : '-';
                                 String weightStr = d['weight']?.toString() ?? '';
-                                String setInfo = '${d['set']}세트 - 운동시간: $timeStr';
+                                String setInfo = '${d['set']}세트 - $timeStr';
                                 if (weightStr.isNotEmpty) {
-                                  setInfo += ' / 수행 무게: $weightStr kg';
+                                  setInfo += ' / $weightStr kg';
                                 }
-                                return Text(setInfo, style: _getCustomFont(color: textColor.withOpacity(0.8), fontSize: 11));
+                                return Text(setInfo, style: _getCustomFont(color: textColor.withOpacity(0.8), fontSize: 11), overflow: TextOverflow.ellipsis);
                               }).toList(),
                             ),
                     ),
@@ -284,7 +296,6 @@ class _ShareScreenState extends State<ShareScreen> {
               );
             }).toList(),
         ],
-        // 메모 표시 영역
         if (widget.memo != null && widget.memo!.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 8.0),
@@ -305,10 +316,18 @@ class _ShareScreenState extends State<ShareScreen> {
     List<String> allSetDetailsStrings = [];
 
     if (widget.setDetails != null && widget.setDetails!.isNotEmpty) {
-      // Flatten all details into a single list of strings
-      for (var ex in widget.record.exercises) {
+      List<String> uniqueOldNames = [];
+      for (var d in widget.setDetails!) {
+        String name = d['exercise'] as String;
+        if (!uniqueOldNames.contains(name)) uniqueOldNames.add(name);
+      }
+
+      for (int i = 0; i < widget.record.exercises.length; i++) {
+        var ex = widget.record.exercises[i];
+        String targetOldName = (i < uniqueOldNames.length) ? uniqueOldNames[i] : ex.exerciseName;
+
         List<Map<String, dynamic>> details = widget.setDetails!
-            .where((d) => d['exercise'] == ex.exerciseName)
+            .where((d) => d['exercise'] == targetOldName)
             .toList();
 
         if (details.isNotEmpty) {
@@ -330,14 +349,13 @@ class _ShareScreenState extends State<ShareScreen> {
       return Text('상세 기록 없음', style: _getCustomFont(color: textColor.withOpacity(0.5), fontSize: 11));
     }
 
-    // Split into two columns
     List<Widget> leftColumn = [];
     List<Widget> rightColumn = [];
 
     for (int i = 0; i < allSetDetailsStrings.length; i++) {
       final textWidget = Padding(
         padding: const EdgeInsets.only(bottom: 2.0),
-        child: Text(allSetDetailsStrings[i], style: _getCustomFont(color: textColor.withOpacity(0.8), fontSize: 10)),
+        child: Text(allSetDetailsStrings[i], style: _getCustomFont(color: textColor.withOpacity(0.8), fontSize: 10), overflow: TextOverflow.ellipsis),
       );
       if (i.isEven) {
         leftColumn.add(textWidget);
@@ -367,8 +385,31 @@ class _ShareScreenState extends State<ShareScreen> {
           Icon(Icons.person, color: textColor, size: 14),
           const SizedBox(width: 4),
         ],
-        Text('HealthTimer | @$nickname', style: GoogleFonts.poppins(color: textColor, fontSize: 12, fontWeight: FontWeight.w600, shadows: [if(textColor == Colors.white) const Shadow(blurRadius: 4, color: Colors.black54)])),
+        Flexible(child: Text('HealthTimer | @$nickname', style: GoogleFonts.poppins(color: textColor, fontSize: 12, fontWeight: FontWeight.w600, shadows: [if(textColor == Colors.white) const Shadow(blurRadius: 4, color: Colors.black54)]), overflow: TextOverflow.ellipsis)),
       ],
+    );
+  }
+
+  // GestureDetector로 감싸 텍스트 스케일 및 이동 처리를 공통으로 수행
+  Widget _buildDraggableText(Widget child) {
+    return Positioned(
+      left: _textPosition.dx, top: _textPosition.dy,
+      child: GestureDetector(
+        onScaleStart: (details) {
+          _baseScale = _textScale;
+        },
+        onScaleUpdate: (details) {
+          setState(() {
+            _textPosition += details.focalPointDelta;
+            _textScale = _baseScale * details.scale;
+          });
+        },
+        child: Transform.scale(
+          scale: _textScale,
+          alignment: Alignment.topLeft,
+          child: child,
+        ),
+      ),
     );
   }
 
@@ -376,34 +417,30 @@ class _ShareScreenState extends State<ShareScreen> {
     return Stack(
       children: [
         if (_backgroundImage != null) Positioned.fill(child: Container(color: Colors.black.withOpacity(0.25))),
-        Positioned(
-          left: _textPosition.dx, top: _textPosition.dy,
-          child: GestureDetector(
-            onPanUpdate: (details) => setState(() => _textPosition += details.delta),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.85,
-                maxHeight: MediaQuery.of(context).size.height * 0.5,
-              ),
-              child: SingleChildScrollView(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-                  decoration: BoxDecoration(color: Colors.black.withOpacity(0.45), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white.withOpacity(0.1))),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min,
-                    children: [
-                      GestureDetector(
-                        onTap: _showEditTitleDialog,
-                        child: Row(children: [Text(_customTitle, style: _getCustomFont(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)), if(!_isCapturing) ...[const SizedBox(width: 6), const Icon(Icons.edit, color: Colors.white70, size: 14)]]),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(_formatTotalTime(widget.record.totalTimeMs), style: GoogleFonts.poppins(color: AppConstants.primaryBlue, fontSize: 56, fontWeight: FontWeight.w900, fontStyle: FontStyle.italic, height: 1.1)),
-                      const SizedBox(height: 4),
-                      _buildWorkoutDetails(Colors.white.withOpacity(0.9)),
-                      const SizedBox(height: 2),
-                      Text(_formatDate(widget.record.date), style: GoogleFonts.poppins(color: Colors.white54, fontSize: 12)),
-                    ],
-                  ),
+        _buildDraggableText(
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.85,
+              maxHeight: MediaQuery.of(context).size.height * 0.55,
+            ),
+            child: SingleChildScrollView(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                decoration: BoxDecoration(color: Colors.black.withOpacity(0.45), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white.withOpacity(0.1))),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min,
+                  children: [
+                    GestureDetector(
+                      onTap: _showEditTitleDialog,
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [Flexible(child: Text(_customTitle, style: _getCustomFont(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)), if(!_isCapturing) ...[const SizedBox(width: 6), const Icon(Icons.edit, color: Colors.white70, size: 14)]]),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(_formatTotalTime(widget.record.totalTimeMs), style: GoogleFonts.poppins(color: AppConstants.primaryBlue, fontSize: 56, fontWeight: FontWeight.w900, fontStyle: FontStyle.italic, height: 1.1)),
+                    const SizedBox(height: 4),
+                    _buildWorkoutDetails(Colors.white.withOpacity(0.9)),
+                    const SizedBox(height: 2),
+                    Text(_formatDate(widget.record.date), style: GoogleFonts.poppins(color: Colors.white54, fontSize: 12)),
+                  ],
                 ),
               ),
             ),
@@ -418,32 +455,28 @@ class _ShareScreenState extends State<ShareScreen> {
     return Stack(
       children: [
         if (_backgroundImage != null) Positioned.fill(child: Container(color: Colors.black.withOpacity(0.3))),
-        Positioned(
-          left: _textPosition.dx, top: _textPosition.dy,
-          child: GestureDetector(
-            onPanUpdate: (details) => setState(() => _textPosition += details.delta),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.85,
-                maxHeight: MediaQuery.of(context).size.height * 0.5,
-              ),
-              child: SingleChildScrollView(
-                child: Container(
-                  padding: const EdgeInsets.all(16.0),
-                  decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.greenAccent.withOpacity(0.5), width: 2)),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min,
-                    children: [
-                      GestureDetector(
-                        onTap: _showEditTitleDialog,
-                        child: Row(children: [Text(_customTitle, style: _getCustomFont(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)), if(!_isCapturing) ...[const SizedBox(width: 6), const Icon(Icons.edit, color: Colors.white70, size: 14)]]),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(_formatTotalTime(widget.record.totalTimeMs), style: GoogleFonts.poppins(color: Colors.greenAccent, fontSize: 48, fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 8),
-                      _buildWorkoutDetails(Colors.white),
-                    ],
-                  ),
+        _buildDraggableText(
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.85,
+              maxHeight: MediaQuery.of(context).size.height * 0.55,
+            ),
+            child: SingleChildScrollView(
+              child: Container(
+                padding: const EdgeInsets.all(16.0),
+                decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.greenAccent.withOpacity(0.5), width: 2)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min,
+                  children: [
+                    GestureDetector(
+                      onTap: _showEditTitleDialog,
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [Flexible(child: Text(_customTitle, style: _getCustomFont(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)), if(!_isCapturing) ...[const SizedBox(width: 6), const Icon(Icons.edit, color: Colors.white70, size: 14)]]),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(_formatTotalTime(widget.record.totalTimeMs), style: GoogleFonts.poppins(color: Colors.greenAccent, fontSize: 48, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 8),
+                    _buildWorkoutDetails(Colors.white),
+                  ],
                 ),
               ),
             ),
@@ -461,44 +494,42 @@ class _ShareScreenState extends State<ShareScreen> {
         Positioned(
           left: 0, right: 0, top: 0,
           child: Container(
-            color: const Color(0xFFFC4C02).withOpacity(0.9), // Strava orange
+            color: const Color(0xFFFC4C02).withOpacity(0.9),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                GestureDetector(
-                  onTap: _showEditTitleDialog,
-                  child: Row(children: [Text(_customTitle, style: _getCustomFont(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)), if(!_isCapturing) ...[const SizedBox(width: 6), const Icon(Icons.edit, color: Colors.white70, size: 14)]]),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: _showEditTitleDialog,
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [Flexible(child: Text(_customTitle, style: _getCustomFont(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)), if(!_isCapturing) ...[const SizedBox(width: 6), const Icon(Icons.edit, color: Colors.white70, size: 14)]]),
+                  ),
                 ),
                 _buildWatermark(nickname, photoUrl, Colors.white),
               ],
             ),
           ),
         ),
-        Positioned(
-          left: _textPosition.dx, top: _textPosition.dy,
-          child: GestureDetector(
-            onPanUpdate: (details) => setState(() => _textPosition += details.delta),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.85,
-                maxHeight: MediaQuery.of(context).size.height * 0.5,
-              ),
-              child: SingleChildScrollView(
-                child: Container(
-                  padding: const EdgeInsets.all(16.0),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), boxShadow: [const BoxShadow(color: Colors.black26, blurRadius: 8)]),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text('TIME', style: GoogleFonts.poppins(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w600)),
-                      Text(_formatTotalTime(widget.record.totalTimeMs), style: GoogleFonts.poppins(color: Colors.black87, fontSize: 36, fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 8),
-                      Container(height: 1, width: 150, color: Colors.grey.withOpacity(0.3)),
-                      const SizedBox(height: 8),
-                      _buildWorkoutDetails(Colors.black87),
-                    ],
-                  ),
+        _buildDraggableText(
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.85,
+              maxHeight: MediaQuery.of(context).size.height * 0.5,
+            ),
+            child: SingleChildScrollView(
+              child: Container(
+                padding: const EdgeInsets.all(16.0),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), boxShadow: [const BoxShadow(color: Colors.black26, blurRadius: 8)]),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('TIME', style: GoogleFonts.poppins(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w600)),
+                    Text(_formatTotalTime(widget.record.totalTimeMs), style: GoogleFonts.poppins(color: Colors.black87, fontSize: 36, fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 8),
+                    Container(height: 1, width: 150, color: Colors.grey.withOpacity(0.3)),
+                    const SizedBox(height: 8),
+                    _buildWorkoutDetails(Colors.black87),
+                  ],
                 ),
               ),
             ),
@@ -537,7 +568,7 @@ class _ShareScreenState extends State<ShareScreen> {
                       children: [
                         GestureDetector(
                           onTap: _showEditTitleDialog,
-                          child: Row(children: [Text(_customTitle, style: _getCustomFont(color: Colors.black87, fontSize: 20, fontWeight: FontWeight.bold)), if(!_isCapturing) ...[const SizedBox(width: 4), const Icon(Icons.edit, color: Colors.black38, size: 14)]]),
+                          child: Row(children: [Flexible(child: Text(_customTitle, style: _getCustomFont(color: Colors.black87, fontSize: 20, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)), if(!_isCapturing) ...[const SizedBox(width: 4), const Icon(Icons.edit, color: Colors.black38, size: 14)]]),
                         ),
                         const SizedBox(height: 4),
                         _buildWorkoutDetails(Colors.black54),
@@ -548,6 +579,7 @@ class _ShareScreenState extends State<ShareScreen> {
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -566,11 +598,10 @@ class _ShareScreenState extends State<ShareScreen> {
 
   Widget _buildVintagePolaroidTemplate(int totalSets, String nickname, String? photoUrl) {
     return Container(
-      color: const Color(0xFFFFF9E6), // 노란빛 빈티지 배경
+      color: const Color(0xFFFFF9E6),
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 24.0),
       child: Column(
         children: [
-          // 마스킹 테이프 효과
           Container(height: 12, width: 100, color: Colors.amber.withOpacity(0.4)),
           const SizedBox(height: 12),
           Expanded(
@@ -587,8 +618,9 @@ class _ShareScreenState extends State<ShareScreen> {
             onTap: _showEditTitleDialog,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(_customTitle, style: _getCustomFont(color: Colors.brown[800]!, fontSize: 24, fontWeight: FontWeight.bold)),
+                Flexible(child: Text(_customTitle, style: _getCustomFont(color: Colors.brown[800]!, fontSize: 24, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                 if(!_isCapturing) ...[const SizedBox(width: 6), const Icon(Icons.edit, color: Colors.brown, size: 16)]
               ]
             ),
@@ -615,6 +647,54 @@ class _ShareScreenState extends State<ShareScreen> {
     );
   }
 
+  Widget _buildModernTemplate(int totalSets, String nickname, String? photoUrl) {
+    return Stack(
+      children: [
+        if (_backgroundImage != null) Positioned.fill(child: Container(color: Colors.black.withOpacity(0.15))),
+        _buildDraggableText(
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.85,
+              maxHeight: MediaQuery.of(context).size.height * 0.55,
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                child: Container(
+                  padding: const EdgeInsets.all(20.0),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: Colors.white.withOpacity(0.2), width: 1.5),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min,
+                      children: [
+                        GestureDetector(
+                          onTap: _showEditTitleDialog,
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [Flexible(child: Text(_customTitle, style: _getCustomFont(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)), if(!_isCapturing) ...[const SizedBox(width: 6), const Icon(Icons.edit, color: Colors.white70, size: 14)]]),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(_formatTotalTime(widget.record.totalTimeMs), style: GoogleFonts.poppins(color: Colors.white, fontSize: 44, fontWeight: FontWeight.w300)),
+                        const SizedBox(height: 12),
+                        _buildWorkoutDetails(Colors.white.withOpacity(0.9)),
+                        const SizedBox(height: 8),
+                        Text(_formatDate(widget.record.date), style: GoogleFonts.poppins(color: Colors.white54, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(right: 16, bottom: 16, child: _buildWatermark(nickname, photoUrl, Colors.white)),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -631,6 +711,8 @@ class _ShareScreenState extends State<ShareScreen> {
       currentTemplateWidget = _buildPolaroidTemplate(totalSets, nickname, photoUrl);
     } else if (_selectedTemplate == 4) {
       currentTemplateWidget = _buildVintagePolaroidTemplate(totalSets, nickname, photoUrl);
+    } else if (_selectedTemplate == 5) {
+      currentTemplateWidget = _buildModernTemplate(totalSets, nickname, photoUrl);
     } else {
       currentTemplateWidget = _buildSportyTemplate(totalSets, nickname, photoUrl);
     }
@@ -663,26 +745,28 @@ class _ShareScreenState extends State<ShareScreen> {
       body: Column(
         children: [
           const SizedBox(height: 20),
-          // 캡처 영역 (RepaintBoundary)
           Expanded(
             child: Center(
               child: RepaintBoundary(
                 key: _globalKey,
-                child: InteractiveViewer(
-                  boundaryMargin: const EdgeInsets.all(20.0),
-                  minScale: 0.5,
-                  maxScale: 4.0,
-                  child: AspectRatio(
-                    aspectRatio: 4 / 5, // 인스타 감성에 최적화된 4:5 비율
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: AppConstants.dialogBackground,
-                        image: _backgroundImage != null && _selectedTemplate != 3 && _selectedTemplate != 4 // 폴라로이드/빈티지는 배경 이미지를 내부에 따로 그림
-                            ? DecorationImage(image: FileImage(_backgroundImage!), fit: BoxFit.cover)
-                            : null,
-                      ),
-                      child: currentTemplateWidget,
-                    ),
+                child: AspectRatio(
+                  aspectRatio: 4 / 5,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // 백그라운드 이미지만 개별적으로 확대/이동 가능하도록 분리
+                      if (_backgroundImage != null && _selectedTemplate != 3 && _selectedTemplate != 4)
+                        InteractiveViewer(
+                          boundaryMargin: const EdgeInsets.all(double.infinity),
+                          minScale: 0.5,
+                          maxScale: 4.0,
+                          child: Image.file(_backgroundImage!, fit: BoxFit.cover),
+                        ),
+                      if (_backgroundImage == null && _selectedTemplate != 3 && _selectedTemplate != 4)
+                        Container(color: AppConstants.dialogBackground),
+                      // 템플릿 영역 (텍스트/위젯 등)
+                      currentTemplateWidget,
+                    ],
                   ),
                 ),
               ),
@@ -691,7 +775,6 @@ class _ShareScreenState extends State<ShareScreen> {
           
           const SizedBox(height: 20),
 
-          // 템플릿 선택기
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -707,11 +790,12 @@ class _ShareScreenState extends State<ShareScreen> {
                 _buildTemplateTab(3, '폴라로이드', Icons.photo_camera_front),
                 const SizedBox(width: 8),
                 _buildTemplateTab(4, '빈티지', Icons.camera_roll),
+                const SizedBox(width: 8),
+                _buildTemplateTab(5, '모던', Icons.blur_on),
               ],
             ),
           ),
           
-          // 공유하기 버튼
           Padding(
             padding: const EdgeInsets.only(left: 24.0, right: 24.0, top: 20.0, bottom: 30.0),
             child: ElevatedButton.icon(
