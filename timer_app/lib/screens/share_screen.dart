@@ -132,7 +132,7 @@ class _ShareScreenState extends State<ShareScreen> {
 
       await Share.shareXFiles(
         [XFile(imgFile.path)],
-        text: '$_customTitle #HealthTimer',
+        text: '$_customTitle #개지리는타이머',
       );
     } catch (e) {
       debugPrint('Error sharing image: $e');
@@ -385,7 +385,7 @@ class _ShareScreenState extends State<ShareScreen> {
           Icon(Icons.person, color: textColor, size: 14),
           const SizedBox(width: 4),
         ],
-        Flexible(child: Text('HealthTimer | @$nickname', style: GoogleFonts.poppins(color: textColor, fontSize: 12, fontWeight: FontWeight.w600, shadows: [if(textColor == Colors.white) const Shadow(blurRadius: 4, color: Colors.black54)]), overflow: TextOverflow.ellipsis)),
+        Flexible(child: Text('개지리는 타이머 | @$nickname', style: GoogleFonts.poppins(color: textColor, fontSize: 12, fontWeight: FontWeight.w600, shadows: [if(textColor == Colors.white) const Shadow(blurRadius: 4, color: Colors.black54)]), overflow: TextOverflow.ellipsis)),
       ],
     );
   }

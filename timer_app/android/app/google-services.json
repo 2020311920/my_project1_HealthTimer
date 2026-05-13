@@ -22,6 +22,74 @@
           }
         },
         {
+          "client_id": "898315864585-scvho93i05t65uvq9o9bo9rrpfovnl6v.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.timer_app",
+            "certificate_hash": "004769f754b71957fdc2a85fcbd4aad755ba24dc"
+          }
+        },
+        {
+          "client_id": "898315864585-48daf89nvtj8j7d3ng98vc9i00jqj687.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAH1BbfIcKf8BdYP-GEXxh2NSop8B4ypIA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "898315864585-48daf89nvtj8j7d3ng98vc9i00jqj687.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "898315864585-u7upf6l2cfraerdvutao82n78hcla8le.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.timerApp"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:898315864585:android:8e17490f7170ccfb3706d8",
+        "android_client_info": {
+          "package_name": "com.gzt.gzTimer"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "898315864585-bh4kukh15iu51tjb222pihsghnguob9n.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.gzt.gzTimer",
+            "certificate_hash": "190d60cd3d160bca98ea89a720c29b3cf9228e6c"
+          }
+        },
+        {
+          "client_id": "898315864585-jafrabnvi78bic2rql699q9jur2e2o8h.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.gzt.gzTimer",
+            "certificate_hash": "887e5213f824ee4196558a10b9ea6833478c7ccd"
+          }
+        },
+        {
+          "client_id": "898315864585-s7rius6d9rsvu9uf361lnujosirhrhto.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.gzt.gzTimer",
+            "certificate_hash": "2adc165a5b3bcb23d758aa828980439783570fd5"
+          }
+        },
+        {
           "client_id": "898315864585-48daf89nvtj8j7d3ng98vc9i00jqj687.apps.googleusercontent.com",
           "client_type": 3
         }
