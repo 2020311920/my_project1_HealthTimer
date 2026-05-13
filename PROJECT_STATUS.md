@@ -44,9 +44,8 @@
   - 🎨 **테마 목록**: 1) 기본 (Glow), 2) 원형 바 (Neon CustomPaint), 3) 미니멀 (Minimal - 테두리만), 4) 사이버펑크 (Cyberpunk - 강렬한 색상과 폰트).
 
 ## 🚧 미완성 및 향후 개발 항목 (To-Do)
-1. **Firebase Console 설정 업데이트 (수동 작업 필요)**
-   - Authentication -> Sign-in method -> OIDC(kakao) 설정 접속.
-   - Client ID 항목의 값을 기존 REST API 키에서 `23b57005abe75c68eea324644ab609db` (네이티브 앱 키)로 변경.
+1. **스플래시 화면 진행**
+2. **구글 플레이스토어 업로드**
 
 ## 🛠️ 다음 개발 스텝 (Next Steps)
 1. **추가 디테일 개선 및 사용자 피드백 반영**: 향후 필요한 추가 기능이나 세부 애니메이션 개선 기획.
